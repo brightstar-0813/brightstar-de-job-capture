@@ -1,12 +1,12 @@
 import fs from "fs";
 import { parseCsv } from "../src/csv.js";
-import { containsAi } from "../src/filter.js";
+import { isDataEngTitle } from "../src/filter.js";
 import { isSlackWebhookUrl } from "../src/slack.js";
 
 const rows = parseCsv(fs.readFileSync("data/jobs.csv", "utf8")).rows;
 const ids = rows.map((r) => r.id);
 const unique = new Set(ids);
-const noAi = rows.filter((r) => !containsAi(r.title, r.description));
+const noDe = rows.filter((r) => !isDataEngTitle(r.title, r.description));
 const blankCore = rows.filter(
   (r) => !r.title || !r.url || !r.description
 );
@@ -17,7 +17,7 @@ console.log(
       rows: rows.length,
       uniqueIds: unique.size,
       duplicateIds: ids.length - unique.size,
-      missingAiSignal: noAi.length,
+      missingDeSignal: noDe.length,
       blankTitleUrlOrJd: blankCore.length,
       sources: [...new Set(rows.map((r) => r.source))],
       statuses: rows.reduce((acc, r) => {

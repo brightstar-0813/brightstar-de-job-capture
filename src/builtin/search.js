@@ -1,11 +1,12 @@
 /**
- * Built In — remote AI jobs via search + detail scrape.
+ * Built In — US-remote data engineering jobs via search + detail scrape.
  */
 
 import { config } from "../config.js";
 import {
-  containsAi,
+  isDataEngTitle,
   isRemoteArrangement,
+  isUsEligible,
   isWithinRecentDays,
   parsePostedDate,
 } from "../filter.js";
@@ -163,7 +164,8 @@ export async function searchBuiltinJobs(browser) {
 
     const kept = [];
     let nonRemote = 0;
-    let nonAi = 0;
+    let nonDe = 0;
+    let nonUs = 0;
     let stale = 0;
 
     for (let i = 0; i < stubs.length; i += 1) {
@@ -175,8 +177,12 @@ export async function searchBuiltinJobs(browser) {
           nonRemote += 1;
           continue;
         }
-        if (!containsAi(job.title, job.description)) {
-          nonAi += 1;
+        if (!isUsEligible(job)) {
+          nonUs += 1;
+          continue;
+        }
+        if (!isDataEngTitle(job.title, job.description)) {
+          nonDe += 1;
           continue;
         }
         if (isWithinRecentDays(job.date_posted, config.recentDays) === false) {
@@ -191,9 +197,9 @@ export async function searchBuiltinJobs(browser) {
     }
 
     console.log(
-      `[builtin] kept ${kept.length} remote AI jobs` +
+      `[builtin] kept ${kept.length} US-remote data engineering jobs` +
         ` (stubs=${stubs.length}, non-remote=${nonRemote},` +
-        ` non-AI=${nonAi}, stale=${stale})`
+        ` non-US=${nonUs}, non-DE=${nonDe}, stale=${stale})`
     );
     return { jobs: kept };
   } finally {

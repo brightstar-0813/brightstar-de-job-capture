@@ -25,25 +25,24 @@ function parseCsvList(raw, fallback) {
 }
 
 const DEFAULT_SEARCH_QUERIES = [
-  "AI Engineer",
-  "AI Developer",
-  "Generative AI Engineer",
-  "Full Stack AI Engineer",
-  "Agentic AI Engineer",
-  "LLM Engineer",
+  "Data Engineer",
+  "Senior Data Engineer",
+  "Analytics Engineer",
+  "ETL Engineer",
+  "Data Platform Engineer",
 ];
 
 const DEFAULT_JOBRIGHT_TITLES = [
-  "AI Engineer",
-  "AI Developer",
-  "Senior AI Engineer",
-  "Full Stack AI Engineer",
-  "Generative AI Engineer",
-  "GenAI Engineer",
-  "Agentic AI Engineer",
-  "LLM Engineer",
-  "Lead AI Engineer",
-  "Principal AI Engineer",
+  "Data Engineer",
+  "Senior Data Engineer",
+  "Staff Data Engineer",
+  "Lead Data Engineer",
+  "Principal Data Engineer",
+  "Analytics Engineer",
+  "ETL Engineer",
+  "Data Platform Engineer",
+  "Data Infrastructure Engineer",
+  "Big Data Engineer",
 ];
 
 export const config = {
@@ -60,10 +59,10 @@ export const config = {
   slackWebhookUrl: String(process.env.SLACK_WEBHOOK_URL || "").trim(),
   port: Number(process.env.PORT || 3847),
   /** Primary query label (logging / API status). */
-  searchQ: process.env.SEARCH_Q || "AI Engineer",
+  searchQ: process.env.SEARCH_Q || "Data Engineer",
   /**
    * Discovery queries for Dice / Built In / Monster / ZipRecruiter.
-   * Discovery queries for AI Engineer / AI Developer family listings.
+   * Discovery queries for Data Engineer family listings.
    * Override with SEARCH_QUERIES (comma-separated).
    */
   searchQueries: parseCsvList(process.env.SEARCH_QUERIES, DEFAULT_SEARCH_QUERIES),
@@ -85,7 +84,7 @@ export const config = {
   captureMonster: bool("CAPTURE_MONSTER", true),
   /**
    * Greenhouse board tokens (boards.greenhouse.io/{token}). No global search —
-   * we poll these company boards and keep remote AI/ML matches.
+   * we poll these company boards and keep US-remote data-engineering matches.
    */
   greenhouseBoards: String(
     process.env.GREENHOUSE_BOARDS ||
@@ -125,6 +124,12 @@ export const config = {
         "mongodb",
         "elastic",
         "confluent",
+        "fivetran",
+        "airbytehq",
+        "dbtlabs",
+        "prefect",
+        "astronomer",
+        "palantir",
         "docusign",
         "smartsheet",
         "qualtrics",
@@ -156,7 +161,7 @@ export const config = {
   jobrightMaxPages: Math.max(1, Number(process.env.JOBRIGHT_MAX_PAGES || process.env.MAX_PAGES || 5)),
   /**
    * JobRight search SEEDS (not title filters). Keep/skip is the capture
-   * rule: remote + AI Engineer/Developer-family title.
+   * rule: US remote + Data Engineer-family title.
    */
   jobrightTitles: parseCsvList(
     process.env.JOBRIGHT_TITLES,

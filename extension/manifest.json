@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "AI Jobs Capture",
-  "description": "Trigger local capture + scrape JobRight from your logged-in Chrome session daily at 5 AM and 5 PM. Jobs land in one combined jobs_latest.csv.",
+  "name": "Data Eng Jobs Capture",
+  "description": "Trigger local capture + scrape JobRight from your logged-in Chrome session daily at 5 AM and 5 PM. US-remote data engineering jobs land in one combined jobs_latest.csv.",
   "version": "1.3.0",
   "permissions": ["storage", "alarms", "tabs", "scripting"],
   "host_permissions": [
@@ -21,7 +21,7 @@
     }
   ],
   "action": {
-    "default_title": "AI Jobs Capture",
+    "default_title": "Data Eng Jobs Capture",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

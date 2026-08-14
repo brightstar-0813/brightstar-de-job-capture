@@ -1,6 +1,6 @@
 /**
- * Greenhouse — pull remote AI jobs from a curated list of public
- * company job boards via boards-api.greenhouse.io (no login required).
+ * Greenhouse — pull US-remote data engineering jobs from a curated list of
+ * public company job boards via boards-api.greenhouse.io (no login required).
  *
  * Greenhouse has no global search: each employer has a board token
  * (boards.greenhouse.io/{token}). Tune via GREENHOUSE_BOARDS.
@@ -8,8 +8,9 @@
 
 import { config } from "../config.js";
 import {
-  containsAi,
+  isDataEngTitle,
   isRemoteArrangement,
+  isUsEligible,
   isWithinRecentDays,
   parsePostedDate,
 } from "../filter.js";
@@ -65,7 +66,8 @@ export async function searchGreenhouseJobs(_browser) {
   const all = [];
   const seen = new Set();
   let nonRemoteSkipped = 0;
-  let nonAiSkipped = 0;
+  let nonDeSkipped = 0;
+  let nonUsSkipped = 0;
   let staleSkipped = 0;
   let boardErrors = 0;
 
@@ -132,8 +134,12 @@ export async function searchGreenhouseJobs(_browser) {
         nonRemoteSkipped += 1;
         continue;
       }
-      if (!containsAi(mapped.title, mapped.description)) {
-        nonAiSkipped += 1;
+      if (!isUsEligible(mapped)) {
+        nonUsSkipped += 1;
+        continue;
+      }
+      if (!isDataEngTitle(mapped.title, mapped.description)) {
+        nonDeSkipped += 1;
         continue;
       }
       if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
@@ -145,10 +151,11 @@ export async function searchGreenhouseJobs(_browser) {
   }
 
   console.log(
-    `[greenhouse] kept ${all.length} remote AI jobs` +
+    `[greenhouse] kept ${all.length} US-remote data engineering jobs` +
       ` (boards=${boards.length}, boardErrors=${boardErrors},` +
       ` non-remote=${nonRemoteSkipped},` +
-      ` non-AI=${nonAiSkipped}, stale=${staleSkipped})`
+      ` non-US=${nonUsSkipped},` +
+      ` non-DE=${nonDeSkipped}, stale=${staleSkipped})`
   );
 
   return { jobs: all };

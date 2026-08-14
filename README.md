@@ -1,6 +1,6 @@
-# AI Jobs Capture (multi-source)
+# Data Engineering Jobs Capture (multi-source)
 
-Capture **remote AI** jobs from Dice, JobRight, Built In, Greenhouse, ZipRecruiter, and Monster **twice daily (5:00 AM and 5:00 PM local time)**, append/dedupe locally, write **dated CSVs**, and Slack-notify on new jobs.
+Capture **US-remote data engineering** jobs from Dice, JobRight, Built In, Greenhouse, ZipRecruiter, and Monster **twice daily (5:00 AM and 5:00 PM local time)**, append/dedupe locally, write **dated CSVs**, and Slack-notify on new jobs.
 
 ## What gets saved
 
@@ -11,8 +11,8 @@ Each run overwrites **one** combined CSV with the latest qualifying jobs from al
 
 Filter (applied to all sources):
 
-- **Keep:** **remote only** (Remote / Remote OK / Remote Solely — not hybrid or on-site) and title is an **AI Engineer / AI Developer** family role (`Senior AI Engineer`, `Full Stack AI Engineer`, `GenAI Engineer`, `Agentic AI Engineer`, `LLM Engineer`, `AI Developer`, …). Exact wording is not required. Posted within the last `RECENT_DAYS` days (default 3).
-- **Skip:** generic SWE/ML/scientist titles even if the JD mentions AI; non-eng “AI” titles (sales, recruiting, PM); **hybrid/on-site**; **LinkedIn** apply/redirect links; **expired / no-longer-available** postings; postings **older than `RECENT_DAYS`**.
+- **Keep:** **US remote only** (Remote / Remote OK / Remote Solely — not hybrid or on-site; not UK/EU/India/etc.) and title is a **Data Engineer** family role (`Senior Data Engineer`, `Analytics Engineer`, `ETL Engineer`, `Data Platform Engineer`, `Big Data Engineer`, `Databricks Engineer`, …). Exact wording is not required. Posted within the last `RECENT_DAYS` days (default 3).
+- **Skip:** generic SWE/ML/scientist/analyst titles even if the JD mentions data; non-eng titles (sales, recruiting, PM); **hybrid/on-site**; **non-US** locations; **LinkedIn** apply/redirect links; **expired / no-longer-available** postings; postings **older than `RECENT_DAYS`**.
 - **Skip (already applied):** jobs you've **already applied to** — JobRight via `POST /swan/job/applied/jobs-v3`, and **Dice** via the *My Jobs → Applied* tab (needs a saved Dice login, see below). Applied jobs are skipped during capture and removed from the local store each run.
 
 ## How automation is split (recommended)
@@ -99,7 +99,7 @@ Then load `extension/` unpacked in Chrome.
 
 | Key | Meaning |
 |-----|---------|
-| `SEARCH_Q` | Primary query label (`AI Engineer`) |
+| `SEARCH_Q` | Primary query label (`Data Engineer`) |
 | `SEARCH_QUERIES` | Comma-separated discovery queries for Dice / Built In / … |
 | `JOBRIGHT_TITLES` | Comma-separated JobRight seed titles |
 | `CAPTURE_DICE` | `true`/`false` |

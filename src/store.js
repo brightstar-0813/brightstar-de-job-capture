@@ -6,7 +6,7 @@ import { matchesCaptureRule, isRecentJob } from "./filter.js";
 
 /**
  * A job qualifies for the store/CSV output when it matches the capture rule
- * (remote AI Engineer/Developer-family title) AND was posted within the configured recency window.
+ * (US-remote Data Engineer-family title) AND was posted within the configured recency window.
  */
 function matchesOutputRule(job) {
   return matchesCaptureRule(job) && isRecentJob(job, config.recentDays);
@@ -234,7 +234,7 @@ export function jobsBySource(source) {
 
 /**
  * Permanently remove stored jobs that no longer satisfy the output rule:
- * the capture rule (hybrid/on-site, or title is not AI Engineer/Developer) or the
+ * the capture rule (hybrid/on-site, non-US, or title is not data engineering) or the
  * recency window (posted more than RECENT_DAYS ago). Used to clean out legacy
  * rows and age out stale postings.
  * @returns {{ removed: number, kept: number }}

@@ -1,6 +1,6 @@
 /**
- * Capture AI jobs from Dice, JobRight, Built In, Greenhouse,
- * ZipRecruiter, and Monster. Task Scheduler / cron entrypoint.
+ * Capture US-remote data engineering jobs from Dice, JobRight, Built In,
+ * Greenhouse, ZipRecruiter, and Monster. Task Scheduler / cron entrypoint.
  */
 
 import { chromium } from "playwright";
@@ -40,7 +40,7 @@ function ingestJobs(jobs, runId, counts, newJobs) {
     if (!matchesCaptureRule(job)) {
       counts.skippedCount += 1;
       console.log(
-        `[filter] skip ${job.id}: not remote AI Engineer/Developer title`
+        `[filter] skip ${job.id}: not US-remote data engineering title`
       );
       continue;
     }

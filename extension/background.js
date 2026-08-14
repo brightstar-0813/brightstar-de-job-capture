@@ -11,19 +11,19 @@ const RUN_HOURS = [5, 17];
 
 /** Same role-family seeds as Playwright JOBRIGHT_TITLES (not title filters). */
 const DEFAULT_TITLES = [
-  "AI Engineer",
-  "AI Developer",
-  "Senior AI Engineer",
-  "Full Stack AI Engineer",
-  "Generative AI Engineer",
-  "GenAI Engineer",
-  "Agentic AI Engineer",
-  "LLM Engineer",
-  "Lead AI Engineer",
-  "Principal AI Engineer",
+  "Data Engineer",
+  "Senior Data Engineer",
+  "Staff Data Engineer",
+  "Lead Data Engineer",
+  "Principal Data Engineer",
+  "Analytics Engineer",
+  "ETL Engineer",
+  "Data Platform Engineer",
+  "Data Infrastructure Engineer",
+  "Big Data Engineer",
 ];
 
-function buildSearchUrl(query = "AI Engineer") {
+function buildSearchUrl(query = "Data Engineer") {
   const taxonomy = encodeURIComponent(
     JSON.stringify([{ taxonomyId: "00-00-00", title: query }])
   );
@@ -155,7 +155,7 @@ async function scrapeTab(tabId, titles) {
  */
 async function captureJobrightFromChrome() {
   const titles = await getTitles();
-  const url = buildSearchUrl(titles[0] || "AI Engineer");
+  const url = buildSearchUrl(titles[0] || "Data Engineer");
 
   const tab = await chrome.tabs.create({ url, active: false });
   const tabId = tab.id;

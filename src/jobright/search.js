@@ -1,5 +1,5 @@
 /**
- * JobRight.ai AI jobs search — keep APPLY WITH AUTOFILL only
+ * JobRight.ai data engineering search — keep APPLY WITH AUTOFILL only
  * (skip APPLY NOW / LinkedIn redirects).
  *
  * Jobs load via POST /swan/recommend/search (not __NEXT_DATA__.jobList).
@@ -8,9 +8,10 @@
 import fs from "fs";
 import { config } from "../config.js";
 import {
-  containsAi,
+  isDataEngTitle,
   isLinkedinLink,
   isRemoteArrangement,
+  isUsEligible,
   parsePostedDate,
   isWithinRecentDays,
 } from "../filter.js";
@@ -106,8 +107,8 @@ function mapApiJob(item) {
   };
 }
 
-function isAiJob(mapped) {
-  return containsAi(mapped.title, mapped.description);
+function isTargetJob(mapped) {
+  return isDataEngTitle(mapped.title, mapped.description) && isUsEligible(mapped);
 }
 
 /**
@@ -252,7 +253,7 @@ export async function searchJobrightJobs(browser) {
   const seen = new Set();
   let linkedinSkipped = 0;
   let nonRemoteSkipped = 0;
-  let nonAiSkipped = 0;
+  let nonDeSkipped = 0;
   let appliedSkipped = 0;
   let staleSkipped = 0;
   let expiredSkipped = 0;
@@ -321,8 +322,8 @@ export async function searchJobrightJobs(browser) {
           nonRemoteSkipped += 1;
           continue;
         }
-        if (!isAiJob(mapped)) {
-          nonAiSkipped += 1;
+        if (!isTargetJob(mapped)) {
+          nonDeSkipped += 1;
           continue;
         }
         if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
@@ -347,10 +348,10 @@ export async function searchJobrightJobs(browser) {
   const unauthenticated = !hasAuth || (titles.length > 0 && queryOkCount === 0);
 
   console.log(
-    `[jobright] kept ${all.length} remote AI jobs` +
+    `[jobright] kept ${all.length} US-remote data engineering jobs` +
       ` (titles=${titles.length}, api=${apiCount}, okQueries=${queryOkCount}/${titles.length},` +
       ` skipped LinkedIn=${linkedinSkipped},` +
-      ` skipped non-remote=${nonRemoteSkipped}, skipped non-AI=${nonAiSkipped},` +
+      ` skipped non-remote=${nonRemoteSkipped}, skipped non-DE/non-US=${nonDeSkipped},` +
       ` skipped already-applied=${appliedSkipped}, skipped expired=${expiredSkipped},` +
       ` skipped stale(>${config.recentDays}d)=${staleSkipped})`
   );

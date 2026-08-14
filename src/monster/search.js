@@ -1,13 +1,14 @@
 /**
- * Monster — best-effort remote AI scrape.
+ * Monster — best-effort US-remote data engineering scrape.
  * The site often returns an empty/blocked page to headless browsers; we detect
  * that and skip cleanly rather than fail the whole capture.
  */
 
 import { config } from "../config.js";
 import {
-  containsAi,
+  isDataEngTitle,
   isRemoteArrangement,
+  isUsEligible,
   isWithinRecentDays,
   parsePostedDate,
 } from "../filter.js";
@@ -165,7 +166,8 @@ export async function searchMonsterJobs(browser) {
           };
 
           if (!isRemoteArrangement(job.work_arrangement)) continue;
-          if (!containsAi(job.title, job.description)) continue;
+          if (!isUsEligible(job)) continue;
+          if (!isDataEngTitle(job.title, job.description)) continue;
           if (isWithinRecentDays(job.date_posted, config.recentDays) === false)
             continue;
           kept.push(job);
@@ -175,7 +177,7 @@ export async function searchMonsterJobs(browser) {
       }
     }
 
-    console.log(`[monster] kept ${kept.length} remote AI jobs`);
+    console.log(`[monster] kept ${kept.length} US-remote data engineering jobs`);
     return { jobs: kept, blocked: false };
   } finally {
     await context.close();

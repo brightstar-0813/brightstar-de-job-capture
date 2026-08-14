@@ -56,7 +56,7 @@ Register-ScheduledTask `
   -Trigger @($triggerAm, $triggerPm) `
   -Settings $settings `
   -Principal $principal `
-  -Description "Capture remote AI jobs daily at 5:00 AM and 5:00 PM" `
+  -Description "Capture US-remote data engineering jobs daily at 5:00 AM and 5:00 PM" `
   -Force | Out-Null
 
 foreach ($legacyTaskName in $legacyTaskNames) {

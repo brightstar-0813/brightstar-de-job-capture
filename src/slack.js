@@ -129,11 +129,11 @@ export async function notifyCaptureComplete({
       ? `\n_…and ${newJobs.length - maxBullets} more new jobs_`
       : "";
 
-  const header = `*${label} AI jobs capture* (run #${runId})\nnew: *${newCount}* · updated: ${updatedCount} · skipped filter: ${skippedCount}`;
+  const header = `*${label} US-remote data engineering capture* (run #${runId})\nnew: *${newCount}* · updated: ${updatedCount} · skipped filter: ${skippedCount}`;
   const body =
     newCount > 0
       ? `${header}\n\n${bullets.join("\n")}${more}`
-      : `${header}\n_No new AI jobs this run._`;
+      : `${header}\n_No new data engineering jobs this run._`;
 
   await postSlackMessage(webhookUrl, body);
   return { ok: true };

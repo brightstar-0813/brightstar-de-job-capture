@@ -1,5 +1,5 @@
 /**
- * JobRight content script — extract remote AI jobs via
+ * JobRight content script — extract US-remote data engineering jobs via
  * POST /swan/recommend/search (skip LinkedIn / applied / non-remote / expired).
  *
  * Wrapped in a guarded IIFE: this file is both a manifest content_script AND
@@ -11,7 +11,7 @@
 (function () {
   // Bump when scrape/API body changes so executeScript can replace a stale
   // injection (old code used workModel: ["Remote"] → HTTP 400).
-  const CS_VERSION = 6;
+  const CS_VERSION = 7;
   if (window.__AI_JOBRIGHT_CS_VERSION__ === CS_VERSION) return;
   if (typeof window.__AI_JOBRIGHT_CS_LISTENER__ === "function") {
     try {
@@ -23,17 +23,54 @@
   window.__AI_JOBRIGHT_CS_VERSION__ = CS_VERSION;
   window.__AI_JOBRIGHT_CS_LOADED__ = true;
 
-const AI_FAMILY_RE =
-  /\b(?:gen(?:erative)?[\s-]?ai|agentic[\s-]?ai|llms?|a\.i\.)\b|\bai\b/i;
-const ENG_OR_DEV_RE = /\b(engineers?|developers?)\b/i;
-const NOT_AI_ENG_TITLE_RE =
-  /\b(account executive|sales|recruiter|recruiting|sourcer|customer success|marketing|product manager|program manager|project manager|designer|writer|intern(?!al)|teacher|instructor)\b/i;
+const NON_ENG_TITLE_RE =
+  /\b(account executive|sales|recruiter|recruiting|sourcer|customer success|marketing|product manager|program manager|project manager|designer|writer|intern(?!al)|teacher|instructor|data entry)\b/i;
+const SKIP_NEAR_DE_RE =
+  /\b(data[\s-]?scientists?|data[\s-]?analysts?|business[\s-]?analysts?|research[\s-]?scientists?|machine[\s-]?learning[\s-]?engineers?|ml[\s-]?engineers?)\b/i;
+const DATA_CENTER_RE = /\bdata[\s-]?cent(?:er|re)s?\b/i;
+const DATA_FETCHING_RE = /\bdata[\s-]?fetching\b/i;
+const DATA_ENG_RE = new RegExp(
+  [
+    String.raw`\b(?:big[\s-]?data|analytics|etl|elt)\b.{0,32}\b(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,32}\b(?:big[\s-]?data|analytics|etl|elt)\b`,
+    String.raw`\bdata[\s-]+(?:engineers?|engineering|developers?)\b`,
+    String.raw`\bdata\b(?![\s-]?cent(?:er|re)).{0,28}\b(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,32}\bdata[\s-]?(?:platform|infrastructure|pipeline|warehouse|ops|migration|integration|engineering)\b`,
+    String.raw`\bdata[\s-]?(?:platform|infrastructure|pipeline|warehouse|ops|migration|integration)(?:[\s-]*(?:engineers?|engineering|developers?))?\b`,
+    String.raw`\b(?:snowflake|databricks|dbt)[\s-]+(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,24}\b(?:snowflake|databricks|dbt)\b`,
+  ].join("|"),
+  "i"
+);
+const US_EXPLICIT_RE =
+  /\b(united states|u\.s\.a\.|u\.s\.|\busa\b|\bus\b|america)\b/i;
+const NON_US_COUNTRY_RE =
+  /\b(united kingdom|england|scotland|wales|\buk\b|europe|european|emea|apac|asia pacific|\basia\b|india|canada|australia|new zealand|germany|france|netherlands|ireland|spain|italy|sweden|norway|denmark|finland|switzerland|austria|belgium|portugal|poland|romania|ukraine|israel|singapore|japan|china|korea|brazil|mexico|argentina|chile|colombia|latam|latin america|philippines|nigeria|pakistan|bangladesh|vietnam|thailand|indonesia|malaysia|uae|dubai|south africa)\b/i;
+const US_STATE_COMMA_RE =
+  /,\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b/i;
+const US_STATE_NAME_RE =
+  /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia)\b/i;
 
-function containsAi(title) {
+function isDataEngTitle(title) {
   const t = String(title || "");
   if (!t.trim()) return false;
-  if (NOT_AI_ENG_TITLE_RE.test(t)) return false;
-  return AI_FAMILY_RE.test(t) && ENG_OR_DEV_RE.test(t);
+  if (NON_ENG_TITLE_RE.test(t)) return false;
+  if (DATA_CENTER_RE.test(t) || DATA_FETCHING_RE.test(t)) return false;
+  if (SKIP_NEAR_DE_RE.test(t) && !DATA_ENG_RE.test(t)) return false;
+  return DATA_ENG_RE.test(t);
+}
+
+function isUsEligible(job) {
+  const blob = [job?.location, job?.remote_restricted_to, job?.title]
+    .map((s) => String(s || ""))
+    .join(" ")
+    .trim();
+  if (!blob) return true;
+  if (US_EXPLICIT_RE.test(blob) || US_STATE_COMMA_RE.test(blob) || US_STATE_NAME_RE.test(blob)) {
+    return true;
+  }
+  if (NON_US_COUNTRY_RE.test(blob)) return false;
+  return true;
 }
 
 function isRemoteArrangement(workArrangement) {
@@ -147,12 +184,12 @@ function isLinkedinApply(mapped) {
   return /linkedin\.com/i.test(link) || /linkedin\.com/i.test(url);
 }
 
-function isAiJob(mapped) {
-  return containsAi(mapped.title, mapped.description);
+function isTargetJob(mapped) {
+  return isDataEngTitle(mapped.title) && isUsEligible(mapped);
 }
 
 async function fetchRecommendJobs(query, count = 50) {
-  const value = query || "AI Engineer";
+  const value = query || "Data Engineer";
   const body = {
     searchType: "job_title",
     value,
@@ -240,7 +277,7 @@ async function fetchAppliedJobIds() {
 }
 
 async function ensureSearch(query) {
-  const q = query || "AI Engineer";
+  const q = query || "Data Engineer";
   if (/value=/i.test(location.href)) return;
   const input = document.querySelector(
     'input[placeholder*="Search" i], input[type="search"]'
@@ -261,7 +298,7 @@ async function scrapeJobrightJobs(titles) {
   const listTitles =
     Array.isArray(titles) && titles.length
       ? titles
-      : ["AI Engineer"];
+      : ["Data Engineer"];
 
   const byId = new Map();
   let apiCount = 0;
@@ -309,7 +346,7 @@ async function scrapeJobrightJobs(titles) {
         continue;
       }
       if (!isRemoteArrangement(mapped.work_arrangement)) continue;
-      if (!isAiJob(mapped)) continue;
+      if (!isTargetJob(mapped)) continue;
       if (isWithinRecentDays(mapped.date_posted, RECENT_DAYS) === false) {
         skippedStale += 1;
         continue;

@@ -1,31 +1,67 @@
 /**
- * Capture rule: remote AI Engineer / AI Developer family only.
+ * Capture rule: US remote data-engineering family only.
  *
- * Gold-standard titles look like the Fantastic Jobs sample: AI Engineer,
- * Senior AI Engineer, Full Stack AI Engineer, AI Developer, GenAI / Agentic
- * AI Engineer, LLM Engineer. Exact wording is not required.
+ * Gold-standard titles: Data Engineer, Senior/Staff/Principal Data Engineer,
+ * Analytics Engineer, ETL/ELT Engineer, Data Platform / Infrastructure /
+ * Pipeline / Warehouse Engineer, Big Data Engineer, DataOps Engineer,
+ * Snowflake / Databricks / dbt Engineer. Exact wording is not required.
  *
- * Generic software/ML titles are skipped even if the JD mentions AI.
- * Non-eng "AI" titles (sales, recruiting, PM) are skipped.
+ * Generic SWE/ML/scientist/analyst titles are skipped even if the JD mentions
+ * data. Non-eng titles (sales, recruiting, PM) are skipped.
+ * Hybrid / on-site and non-US locations are skipped.
  */
 
-const AI_FAMILY_RE =
-  /\b(?:gen(?:erative)?[\s-]?ai|agentic[\s-]?ai|llms?|a\.i\.)\b|\bai\b/i;
+const NON_ENG_TITLE_RE =
+  /\b(account executive|sales|recruiter|recruiting|sourcer|customer success|marketing|product manager|program manager|project manager|designer|writer|intern(?!al)|teacher|instructor|data entry)\b/i;
 
-const ENG_OR_DEV_RE = /\b(engineers?|developers?)\b/i;
+const SKIP_NEAR_DE_RE =
+  /\b(data[\s-]?scientists?|data[\s-]?analysts?|business[\s-]?analysts?|research[\s-]?scientists?|machine[\s-]?learning[\s-]?engineers?|ml[\s-]?engineers?)\b/i;
 
-const NOT_AI_ENG_TITLE_RE =
-  /\b(account executive|sales|recruiter|recruiting|sourcer|customer success|marketing|product manager|program manager|project manager|designer|writer|intern(?!al)|teacher|instructor)\b/i;
+const DATA_CENTER_RE = /\bdata[\s-]?cent(?:er|re)s?\b/i;
+const DATA_FETCHING_RE = /\bdata[\s-]?fetching\b/i;
+
+const DATA_ENG_RE = new RegExp(
+  [
+    String.raw`\b(?:big[\s-]?data|analytics|etl|elt)\b.{0,32}\b(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,32}\b(?:big[\s-]?data|analytics|etl|elt)\b`,
+    String.raw`\bdata[\s-]+(?:engineers?|engineering|developers?)\b`,
+    String.raw`\bdata\b(?![\s-]?cent(?:er|re)).{0,28}\b(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,32}\bdata[\s-]?(?:platform|infrastructure|pipeline|warehouse|ops|migration|integration|engineering)\b`,
+    String.raw`\bdata[\s-]?(?:platform|infrastructure|pipeline|warehouse|ops|migration|integration)(?:[\s-]*(?:engineers?|engineering|developers?))?\b`,
+    String.raw`\b(?:snowflake|databricks|dbt)[\s-]+(?:engineers?|engineering|developers?)\b`,
+    String.raw`\b(?:engineers?|engineering|developers?)\b.{0,24}\b(?:snowflake|databricks|dbt)\b`,
+  ].join("|"),
+  "i"
+);
+
+const US_EXPLICIT_RE =
+  /\b(united states|u\.s\.a\.|u\.s\.|\busa\b|\bus\b|america)\b/i;
+
+const NON_US_COUNTRY_RE =
+  /\b(united kingdom|england|scotland|wales|\buk\b|europe|european|emea|apac|asia pacific|\basia\b|india|canada|australia|new zealand|germany|france|netherlands|ireland|spain|italy|sweden|norway|denmark|finland|switzerland|austria|belgium|portugal|poland|romania|ukraine|israel|singapore|japan|china|korea|brazil|mexico|argentina|chile|colombia|latam|latin america|philippines|nigeria|pakistan|bangladesh|vietnam|thailand|indonesia|malaysia|uae|dubai|south africa)\b/i;
+
+const US_STATE_COMMA_RE =
+  /,\s*(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b/i;
+
+const US_STATE_NAME_RE =
+  /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia)\b/i;
 
 /**
- * Title is an AI Engineer / AI Developer (or close variant). JD is ignored
- * so a backend SWE with "we use AI" in the description is not kept.
+ * Title is a data-engineering family role (or close variant). JD is ignored
+ * so a backend SWE with "we use Spark" in the description is not kept.
  */
-export function containsAi(title, _description) {
+export function isDataEngTitle(title, _description) {
   const t = String(title || "");
   if (!t.trim()) return false;
-  if (NOT_AI_ENG_TITLE_RE.test(t)) return false;
-  return AI_FAMILY_RE.test(t) && ENG_OR_DEV_RE.test(t);
+  if (NON_ENG_TITLE_RE.test(t)) return false;
+  if (DATA_CENTER_RE.test(t) || DATA_FETCHING_RE.test(t)) return false;
+  if (SKIP_NEAR_DE_RE.test(t) && !DATA_ENG_RE.test(t)) return false;
+  return DATA_ENG_RE.test(t);
+}
+
+/** @deprecated Use isDataEngTitle — kept so older call sites keep working. */
+export function containsAi(title, description) {
+  return isDataEngTitle(title, description);
 }
 
 /**
@@ -43,14 +79,42 @@ export function isRemoteArrangement(workArrangement) {
   return /\bremote\b/.test(w);
 }
 
+function locationBlob(job) {
+  return [
+    job?.location,
+    job?.remote_restricted_to,
+    job?.title,
+  ]
+    .map((s) => String(s || ""))
+    .join(" ")
+    .trim();
+}
+
 /**
- * Final capture decision: AI Engineer/Developer-family title + remote.
- * @param {{ title?: string, description?: string, organization?: string, work_arrangement?: string }} job
+ * US-eligible remote: keep when the posting is for the United States (or has
+ * no country, because Dice / JobRight / Built In searches are already US-scoped).
+ * Skip when location/restriction is clearly another country and does not also
+ * mention the US.
+ */
+export function isUsEligible(job) {
+  const blob = locationBlob(job);
+  if (!blob) return true;
+  if (US_EXPLICIT_RE.test(blob) || US_STATE_COMMA_RE.test(blob) || US_STATE_NAME_RE.test(blob)) {
+    return true;
+  }
+  if (NON_US_COUNTRY_RE.test(blob)) return false;
+  return true;
+}
+
+/**
+ * Final capture decision: data-engineering title + remote + US.
+ * @param {{ title?: string, description?: string, organization?: string, work_arrangement?: string, location?: string, remote_restricted_to?: string }} job
  */
 export function matchesCaptureRule(job) {
   if (!job) return false;
   if (!isRemoteArrangement(job.work_arrangement)) return false;
-  return containsAi(job.title, job.description);
+  if (!isUsEligible(job)) return false;
+  return isDataEngTitle(job.title, job.description);
 }
 
 export function filterAiJobs(jobs) {

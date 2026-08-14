@@ -1,12 +1,13 @@
 /**
- * ZipRecruiter — best-effort remote AI scrape.
+ * ZipRecruiter — best-effort US-remote data engineering scrape.
  * Often blocked by Cloudflare in headless mode; returns [] with a warning then.
  */
 
 import { config } from "../config.js";
 import {
-  containsAi,
+  isDataEngTitle,
   isRemoteArrangement,
+  isUsEligible,
   isWithinRecentDays,
   parsePostedDate,
 } from "../filter.js";
@@ -20,7 +21,7 @@ function buildSearchUrl() {
   const q =
     (config.searchQueries && config.searchQueries[0]) ||
     config.searchQ ||
-    "AI Engineer";
+    "Data Engineer";
   return `https://www.ziprecruiter.com/Jobs/Remote-${encodeURIComponent(
     String(q).replace(/\s+/g, "-")
   )}`;
@@ -161,7 +162,8 @@ export async function searchZiprecruiterJobs(browser) {
         };
 
         if (!isRemoteArrangement(job.work_arrangement)) continue;
-        if (!containsAi(job.title, job.description)) continue;
+        if (!isUsEligible(job)) continue;
+        if (!isDataEngTitle(job.title, job.description)) continue;
         if (isWithinRecentDays(job.date_posted, config.recentDays) === false) continue;
         kept.push(job);
       } catch (err) {
@@ -169,7 +171,7 @@ export async function searchZiprecruiterJobs(browser) {
       }
     }
 
-    console.log(`[ziprecruiter] kept ${kept.length} remote AI jobs`);
+    console.log(`[ziprecruiter] kept ${kept.length} US-remote data engineering jobs`);
     return { jobs: kept, blocked: false };
   } finally {
     await context.close();
