@@ -1,24 +1,25 @@
 /**
- * JobRight.ai data engineering search — keep APPLY WITH AUTOFILL only
- * (skip APPLY NOW / LinkedIn redirects).
- *
- * Jobs load via POST /swan/recommend/search (not __NEXT_DATA__.jobList).
+ * JobRight.ai data-engineering search — remote US roles via recommend/search API.
+ * Discovery needs no login. Optional saved session still excludes already-applied
+ * jobs (Playwright + jobright-auth.json).
  */
 
 import fs from "fs";
 import { config } from "../config.js";
+import { contextOptions } from "../browser.js";
 import {
   isDataEngTitle,
-  isLinkedinLink,
-  isRemoteArrangement,
   isUsEligible,
+  isRemoteArrangement,
   parsePostedDate,
   isWithinRecentDays,
 } from "../filter.js";
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+import {
+  isLinkedinJobUrl,
+  pickJobrightJobUrl,
+  buildJobrightDescription,
+} from "./url.js";
+import { fetchRecommendSearch } from "./client.js";
 
 export function buildJobrightSearchUrl(page = 1, query = config.searchQ) {
   const taxonomy = encodeURIComponent(
@@ -47,18 +48,6 @@ function parseSalary(salaryDesc) {
   return { min: "", max: "", unit: "" };
 }
 
-function buildDescription(jr) {
-  const parts = [];
-  if (jr.jobSummary) parts.push(String(jr.jobSummary).trim());
-  if (Array.isArray(jr.coreResponsibilities) && jr.coreResponsibilities.length) {
-    parts.push("Responsibilities:\n- " + jr.coreResponsibilities.join("\n- "));
-  }
-  if (Array.isArray(jr.requirements) && jr.requirements.length) {
-    parts.push("Requirements:\n- " + jr.requirements.join("\n- "));
-  }
-  return parts.join("\n\n").trim();
-}
-
 function mapApiJob(item) {
   const jr = item?.jobResult || {};
   const company = item?.companyResult || {};
@@ -66,19 +55,18 @@ function mapApiJob(item) {
   if (!id) return null;
 
   const salary = parseSalary(jr.salaryDesc);
-  const url = (
-    jr.url ||
-    `https://jobright.ai/jobs/info/${jr.jobId}`
-  ).split("?")[0];
+  const applyLink = String(jr.applyLink || jr.originalUrl || "").trim();
+  const originalUrl = String(jr.originalUrl || "").trim();
+  const redirectsToLinkedin =
+    isLinkedinJobUrl(applyLink) || isLinkedinJobUrl(originalUrl);
+  const url = pickJobrightJobUrl(jr);
 
-  // Prefer the absolute epoch publishTime; fall back to the relative desc.
-  const postedAbs = parsePostedDate(jr.publishTime) || parsePostedDate(jr.publishTimeDesc);
+  const postedAbs =
+    parsePostedDate(jr.publishTime) || parsePostedDate(jr.publishTimeDesc);
   const datePosted = postedAbs
     ? postedAbs.toISOString().slice(0, 10)
     : String(jr.publishTime || jr.publishTimeDesc || "");
 
-  // Prefer JobRight's workModel; fall back to isRemote. Unknown / non-remote
-  // defaults to Onsite so the remote-only filter rejects it.
   const workArrangement =
     jr.workModel || (jr.isRemote === true ? "Remote" : "Onsite");
 
@@ -99,101 +87,19 @@ function mapApiJob(item) {
     source: "jobright",
     date_posted: datePosted,
     url,
-    description: buildDescription(jr),
-    _easyApply: jr.jobtargetEasyapply === true,
-    _applyLink: String(jr.applyLink || jr.originalUrl || ""),
-    _isCompanySite: jr.isCompanySiteLink === true,
+    description: buildJobrightDescription(jr),
+    _applyLink: applyLink,
+    _linkedinApply: redirectsToLinkedin,
     _expired: jr.isDeleted === true || jr.hiddenJob === true,
   };
 }
 
 function isTargetJob(mapped) {
-  return isDataEngTitle(mapped.title, mapped.description) && isUsEligible(mapped);
-}
-
-/**
- * Exclude jobs whose apply/job link points to LinkedIn (redirect applications
- * we don't want). Everything else from the API is accepted.
- */
-function isLinkedinApply(mapped) {
-  return isLinkedinLink(mapped._applyLink, mapped.url);
-}
-
-/**
- * Fetch job list via JobRight's recommend/search API (session cookies).
- * @param {import('playwright').Page} page
- */
-async function fetchRecommendJobs(
-  page,
-  { count, position = 0, refresh = true, query = config.searchQ, daysAgo = null }
-) {
-  const value = query;
-  return page.evaluate(
-    async ({ value, count, position, refresh, daysAgo }) => {
-      const body = {
-        searchType: "job_title",
-        value,
-        jobTaxonomyList: [{ taxonomyId: "00-00-00", title: value }],
-        country: "US",
-        jobTypes: [],
-        seniority: [],
-        // JobRight expects integer enums: 1=Onsite, 2=Remote, 3=Hybrid
-        workModel: [2],
-        locations: [],
-        companies: [],
-        isH1BOnly: false,
-        companyCategory: null,
-        annualSalaryMinimum: null,
-        roleType: null,
-        companyStages: null,
-        skills: [],
-        excludedCompanies: [],
-        excludedSkills: null,
-        excludeStaffingAgency: false,
-        minYearsOfExperienceRange: null,
-        excludeCompanyCategory: [],
-        excludeSecurityClearance: false,
-        excludeUsCitizen: false,
-        daysAgo: daysAgo || null,
-        refresh,
-        position,
-        sortCondition: 0,
-      };
-      const url =
-        `https://jobright.ai/swan/recommend/search?searchType=job_title` +
-        `&refresh=${refresh ? "true" : "false"}&count=${count}` +
-        `&position=${position}&sortCondition=0`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/plain, */*",
-          "x-client-type": "web",
-        },
-        body: JSON.stringify(body),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        return { ok: false, status: res.status, jobList: [] };
-      }
-      const json = await res.json();
-      return {
-        ok: !!json?.success,
-        status: res.status,
-        jobList: json?.result?.jobList || [],
-        jobNum: json?.result?.jobNum,
-      };
-    },
-    { value, count, position, refresh, daysAgo }
+  return (
+    isDataEngTitle(mapped.title, mapped.description) && isUsEligible(mapped)
   );
 }
 
-/**
- * Fetch the set of jobs the user has already applied to on JobRight, via
- * POST /swan/job/applied/jobs-v3 (applyStatus:0 covers every applied stage).
- * Returns a Set of store IDs like "jobright_<jobId>".
- * @param {import('playwright').Page} page
- */
 async function fetchAppliedJobIds(page) {
   return page.evaluate(async () => {
     const ids = [];
@@ -229,80 +135,98 @@ async function fetchAppliedJobIds(page) {
 }
 
 /**
+ * Optional: load already-applied JobRight ids when a saved login exists.
  * @param {import('playwright').Browser} browser
  */
-export async function searchJobrightJobs(browser) {
+async function loadAppliedIds(browser) {
   const hasAuth = fs.existsSync(config.jobrightAuthPath);
-  const contextOptions = {
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    viewport: { width: 1400, height: 900 },
-  };
-  if (hasAuth) {
-    contextOptions.storageState = config.jobrightAuthPath;
-    console.log(`[jobright] using auth: ${config.jobrightAuthPath}`);
-  } else {
-    console.warn(
-      `[jobright] no auth file at ${config.jobrightAuthPath} — APPLY WITH AUTOFILL may be hidden. Run: npm run jobright:login`
-    );
+  if (!hasAuth || !browser) {
+    return { appliedIds: new Set(), unauthenticated: !hasAuth, hadAuthFile: hasAuth };
   }
-
-  const context = await browser.newContext(contextOptions);
+  const context = await browser.newContext(
+    contextOptions({ storageState: config.jobrightAuthPath })
+  );
   const page = await context.newPage();
+  try {
+    await page.goto("https://jobright.ai/jobs", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+    await page.waitForTimeout(2000);
+    const applied = await fetchAppliedJobIds(page).catch(() => null);
+    if (applied?.ok) {
+      console.log(
+        `[jobright] already-applied jobs to exclude: ${applied.ids.length}`
+      );
+      return {
+        appliedIds: new Set(applied.ids),
+        unauthenticated: false,
+        hadAuthFile: true,
+      };
+    }
+    console.warn(
+      `[jobright] session unauthenticated (login missing or expired) — run: npm run jobright:login`
+    );
+    return { appliedIds: new Set(), unauthenticated: true, hadAuthFile: true };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+/**
+ * Fetch remote data-engineering jobs from JobRight API.
+ * @param {import('playwright').Browser} [browser] used only for optional applied exclusion
+ */
+export async function searchJobrightJobs(browser) {
+  console.log(`[jobright] API-first discovery (login only for applied exclusion)`);
+
+  const { appliedIds, unauthenticated, hadAuthFile } = await loadAppliedIds(
+    browser
+  );
+
   const all = [];
   const seen = new Set();
-  let linkedinSkipped = 0;
   let nonRemoteSkipped = 0;
   let nonDeSkipped = 0;
   let appliedSkipped = 0;
   let staleSkipped = 0;
   let expiredSkipped = 0;
+  let linkedinSkipped = 0;
   let apiCount = 0;
   let queryOkCount = 0;
-  let appliedIds = new Set();
 
   const titles =
     config.jobrightTitles && config.jobrightTitles.length
       ? config.jobrightTitles
       : [config.searchQ];
-  const perTitle = Math.max(10, Math.min(100, config.pageSize * config.jobrightMaxPages));
+  const pageSize = 20;
+  const pagesPerTitle = Math.max(1, config.jobrightMaxPages);
 
-  try {
-    for (const query of titles) {
-      const url = buildJobrightSearchUrl(1, query);
-      console.log(`[jobright] query="${query}" open: ${url}`);
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await page.waitForTimeout(3500 + config.delayMs);
-
-      if (appliedIds.size === 0) {
-        const applied = await fetchAppliedJobIds(page).catch(() => null);
-        if (applied?.ok && applied.ids.length) {
-          appliedIds = new Set(applied.ids);
-          console.log(`[jobright] already-applied jobs to exclude: ${appliedIds.size}`);
-        }
-      }
-
+  for (const query of titles) {
+    let titleOk = false;
+    for (let page = 0; page < pagesPerTitle; page += 1) {
+      const position = page * pageSize;
       console.log(
-        `[jobright] fetching recommend/search query="${query}" count=${perTitle}`
+        `[jobright] API recommend/search query="${query}" page=${page + 1}/${pagesPerTitle} count=${pageSize} position=${position}`
       );
-      const api = await fetchRecommendJobs(page, {
-        count: perTitle,
-        position: 0,
-        refresh: true,
+      const api = await fetchRecommendSearch({
+        count: pageSize,
         query,
         daysAgo: config.recentDays,
+        position,
       });
       const list = Array.isArray(api.jobList) ? api.jobList : [];
       apiCount += list.length;
-      if (api.ok) queryOkCount += 1;
+      if (api.ok) titleOk = true;
       console.log(
-        `[jobright] query="${query}" api jobs=${list.length} jobNum=${api.jobNum ?? "?"} ok=${api.ok}`
+        `[jobright] query="${query}" page=${page + 1} api jobs=${list.length} jobNum=${api.jobNum ?? "?"} ok=${api.ok}` +
+          (api.errorMsg ? ` err=${api.errorMsg}` : "")
       );
+      if (!api.ok || !list.length) break;
 
       for (const item of list) {
         const mapped = mapApiJob(item);
         if (!mapped) continue;
-
         if (seen.has(mapped.id)) continue;
         seen.add(mapped.id);
 
@@ -314,7 +238,7 @@ export async function searchJobrightJobs(browser) {
           appliedSkipped += 1;
           continue;
         }
-        if (isLinkedinApply(mapped)) {
+        if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
           linkedinSkipped += 1;
           continue;
         }
@@ -331,21 +255,16 @@ export async function searchJobrightJobs(browser) {
           continue;
         }
 
-        delete mapped._easyApply;
         delete mapped._applyLink;
-        delete mapped._isCompanySite;
+        delete mapped._linkedinApply;
         delete mapped._expired;
         all.push(mapped);
       }
-    }
-  } finally {
-    await context.close();
-  }
 
-  // Session is considered unauthenticated (login missing/expired) when there
-  // was no auth file, or every recommend/search query failed (ok=false). A
-  // valid session returns ok=true even when there are zero matching jobs.
-  const unauthenticated = !hasAuth || (titles.length > 0 && queryOkCount === 0);
+      if (list.length < pageSize) break;
+    }
+    if (titleOk) queryOkCount += 1;
+  }
 
   console.log(
     `[jobright] kept ${all.length} US-remote data engineering jobs` +
@@ -355,20 +274,15 @@ export async function searchJobrightJobs(browser) {
       ` skipped already-applied=${appliedSkipped}, skipped expired=${expiredSkipped},` +
       ` skipped stale(>${config.recentDays}d)=${staleSkipped})`
   );
-  if (unauthenticated) {
-    console.warn(
-      `[jobright] session unauthenticated (login missing or expired) — run: npm run jobright:login`
-    );
-  }
 
   return {
     jobs: all,
     appliedIds: Array.from(appliedIds),
     auth: {
-      hadAuthFile: hasAuth,
+      hadAuthFile,
       attempts: titles.length,
       okQueries: queryOkCount,
-      unauthenticated,
+      unauthenticated: hadAuthFile && unauthenticated,
     },
   };
 }

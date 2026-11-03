@@ -1,21 +1,144 @@
 import fs from "fs";
 import path from "path";
-import { config, CSV_HEADERS, SOURCE_IDS, CSV_SOURCE_ORDER } from "./config.js";
+import { config, CSV_HEADERS, SOURCE_IDS, SOURCE_PRIORITY, CSV_SOURCE_ORDER } from "./config.js";
 import { writeCsv } from "./csv.js";
 import { matchesCaptureRule, isRecentJob } from "./filter.js";
+import {
+  isIncompleteExternalJobUrl,
+  repairJobrightStoredUrl,
+} from "./jobright/url.js";
+
+/** Career-board sources: still listed = still open, even if date_posted is old. */
+const ATS_SOURCES = new Set(["greenhouse", "lever", "ashby"]);
 
 /**
  * A job qualifies for the store/CSV output when it matches the capture rule
- * (US-remote Data Engineer-family title) AND was posted within the configured recency window.
+ * (US-remote Data Engineer-family title) AND was posted within the configured
+ * recency window. Greenhouse/Lever/Ashby jobs instead stay while we still see
+ * them on the live board (last_seen_at).
  */
 function matchesOutputRule(job) {
-  return matchesCaptureRule(job) && isRecentJob(job, config.recentDays);
+  if (!matchesCaptureRule(job)) return false;
+  const src = String(job.source || "").toLowerCase();
+  if (ATS_SOURCES.has(src)) {
+    return isRecentJob(
+      { ...job, date_posted: job.last_seen_at || job.first_seen_at },
+      config.recentDays
+    );
+  }
+  return isRecentJob(job, config.recentDays);
+}
+
+function normalizeKeyPart(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^\w\s+&/-]/g, " ")
+    .replace(
+      /\b(inc|llc|ltd|corp|corporation|co|company|limited|the)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * File-backed store (JSON) — no native deps.
- * Keeps jobs + run history for dedupe and CSV sync.
+ * Same title + employer is one job, even when boards assign different ids.
  */
+export function jobFingerprint(job) {
+  const title = normalizeKeyPart(job?.title);
+  const org = normalizeKeyPart(job?.organization);
+  if (!title || !org) return "";
+  return `${title}||${org}`;
+}
+
+function sourceFromId(id) {
+  const prefix = String(id || "").split("_")[0].toLowerCase();
+  return SOURCE_IDS.includes(prefix) ? prefix : "";
+}
+
+function sourceHintFromUrl(url) {
+  const u = String(url || "").toLowerCase();
+  if (!u) return "";
+  if (/boards\.greenhouse\.io|greenhouse\.io/.test(u)) return "greenhouse";
+  if (/jobs\.lever\.co/.test(u)) return "lever";
+  if (/jobs\.ashbyhq\.com|ashbyhq\.com/.test(u)) return "ashby";
+  if (/dice\.com/.test(u)) return "dice";
+  if (/ziprecruiter\.com/.test(u)) return "ziprecruiter";
+  if (/builtin\.com/.test(u)) return "builtin";
+  if (/monster\.com/.test(u)) return "monster";
+  if (/himalayas\.app/.test(u)) return "himalayas";
+  if (/remotive\.com/.test(u)) return "remotive";
+  if (/remoteok\.com/.test(u)) return "remoteok";
+  if (/weworkremotely\.com/.test(u)) return "wwr";
+  return "";
+}
+
+export function sourcePriorityRank(job) {
+  const src = String(
+    sourceHintFromUrl(job?.url) ||
+      job?.source ||
+      sourceFromId(job?.id) ||
+      ""
+  ).toLowerCase();
+  const idx = SOURCE_PRIORITY.indexOf(src);
+  return idx === -1 ? SOURCE_PRIORITY.length : idx;
+}
+
+function preferJob(a, b) {
+  const pa = sourcePriorityRank(a);
+  const pb = sourcePriorityRank(b);
+  if (pa !== pb) return pa < pb ? a : b;
+
+  const aDesc = String(a.description || "").length;
+  const bDesc = String(b.description || "").length;
+  if (bDesc !== aDesc) return bDesc > aDesc ? b : a;
+  const aSeen = String(a.last_seen_at || a.first_seen_at || "");
+  const bSeen = String(b.last_seen_at || b.first_seen_at || "");
+  if (bSeen !== aSeen) return bSeen > aSeen ? b : a;
+  return a;
+}
+
+function urlQuality(url) {
+  const u = String(url || "").trim();
+  if (!u) return 0;
+  if (isIncompleteExternalJobUrl(u)) return 1;
+  if (/\/apply\/?$/i.test(u)) return 2;
+  if (/jobright\.ai\/jobs\/info\//i.test(u)) return 3;
+  return 4;
+}
+
+function preferStoredUrl(...urls) {
+  let best = "";
+  let bestQ = -1;
+  for (const u of urls) {
+    const s = String(u || "").trim();
+    if (!s) continue;
+    const q = urlQuality(s);
+    if (q > bestQ) {
+      best = s;
+      bestQ = q;
+    }
+  }
+  return best;
+}
+
+function preferStoredDescription(...descs) {
+  let best = "";
+  for (const d of descs) {
+    const s = String(d || "");
+    if (s.length > best.length) best = s;
+  }
+  return best;
+}
+
+function findJobByFingerprint(jobs, fingerprint, exceptId) {
+  if (!fingerprint) return null;
+  for (const job of Object.values(jobs)) {
+    if (exceptId && String(job.id) === String(exceptId)) continue;
+    if (jobFingerprint(job) === fingerprint) return job;
+  }
+  return null;
+}
 
 function ensureDataDir() {
   fs.mkdirSync(config.dataDir, { recursive: true });
@@ -62,7 +185,6 @@ function save() {
   fs.writeFileSync(storePath(), JSON.stringify(cache, null, 2), "utf8");
 }
 
-// Keep dbPath config for compatibility; also mirror a marker file name
 export function getMeta(key, fallback = null) {
   const s = load();
   return Object.prototype.hasOwnProperty.call(s.meta, key)
@@ -172,6 +294,7 @@ export function allJobs() {
 
 /**
  * Upsert a scraped job for the current run.
+ * Fingerprint-merges cross-board duplicates, preferring higher-priority sources.
  * @returns {{ status: 'new'|'updated', job: object }}
  */
 export function upsertJob(scraped, runId) {
@@ -201,6 +324,37 @@ export function upsertJob(scraped, runId) {
   };
 
   if (!existing) {
+    const twin = findJobByFingerprint(s.jobs, jobFingerprint(base), id);
+    if (twin) {
+      const winner = preferJob(twin, base);
+      const merged = {
+        ...winner,
+        id: winner.id,
+        source:
+          sourceFromId(winner.id) ||
+          winner.source ||
+          twin.source ||
+          base.source,
+        url: preferStoredUrl(winner.url, twin.url, base.url),
+        description: preferStoredDescription(
+          winner.description,
+          twin.description,
+          base.description
+        ),
+        date_posted: winner.date_posted || twin.date_posted || base.date_posted,
+        first_seen_run_id: twin.first_seen_run_id,
+        last_seen_run_id: runId,
+        first_seen_at: twin.first_seen_at,
+        last_seen_at: now,
+        status: "updated",
+      };
+      if (winner.id !== twin.id) {
+        delete s.jobs[twin.id];
+      }
+      s.jobs[merged.id] = merged;
+      save();
+      return { status: "updated", job: merged };
+    }
     const job = {
       ...base,
       first_seen_run_id: runId,
@@ -216,6 +370,8 @@ export function upsertJob(scraped, runId) {
 
   const job = {
     ...base,
+    url: preferStoredUrl(base.url, existing.url),
+    description: preferStoredDescription(base.description, existing.description),
     first_seen_run_id: existing.first_seen_run_id,
     last_seen_run_id: runId,
     first_seen_at: existing.first_seen_at,
@@ -233,10 +389,8 @@ export function jobsBySource(source) {
 }
 
 /**
- * Permanently remove stored jobs that no longer satisfy the output rule:
- * the capture rule (hybrid/on-site, non-US, or title is not data engineering) or the
- * recency window (posted more than RECENT_DAYS ago). Used to clean out legacy
- * rows and age out stale postings.
+ * Permanently remove stored jobs that no longer satisfy the output rule.
+ * Also collapses fingerprint duplicates.
  * @returns {{ removed: number, kept: number }}
  */
 export function pruneStore() {
@@ -249,13 +403,29 @@ export function pruneStore() {
       removed += 1;
     }
   }
+
+  const byFp = new Map();
+  for (const job of Object.values(s.jobs)) {
+    const fp = jobFingerprint(job);
+    if (!fp) continue;
+    const prev = byFp.get(fp);
+    if (!prev) {
+      byFp.set(fp, job);
+      continue;
+    }
+    const winner = preferJob(prev, job);
+    const loser = winner === prev ? job : prev;
+    byFp.set(fp, winner);
+    delete s.jobs[loser.id];
+    removed += 1;
+  }
+
   if (removed > 0) save();
   return { removed, kept: Object.keys(s.jobs).length };
 }
 
 /**
- * Permanently remove stored jobs by id (e.g. jobs the user has since applied
- * to on JobRight). Ignores ids that are not present.
+ * Permanently remove stored jobs by id (e.g. already-applied JobRight/Dice).
  * @param {Iterable<string>} ids
  * @returns {{ removed: number, kept: number }}
  */
@@ -273,21 +443,35 @@ export function removeJobs(ids) {
   return { removed, kept: Object.keys(s.jobs).length };
 }
 
-/**
- * Write one combined CSV with the latest qualifying jobs from all sources.
- * Overwrites `jobs_latest.csv` (or CSV_LATEST_FILE) each run.
- * @returns {{ csvPath: string, latestPath: string, count: number }}
- */
+/** Repair incomplete JobRight / ATS shell URLs in the store. */
+export function repairJobrightUrls() {
+  const s = load();
+  let repaired = 0;
+  for (const job of Object.values(s.jobs)) {
+    const before = String(job.url || "");
+    const after = repairJobrightStoredUrl(job);
+    if (after && after !== before) {
+      job.url = after;
+      repaired += 1;
+    }
+  }
+  if (repaired > 0) save();
+  return { repaired };
+}
+
 function csvSourceRank(source) {
   const src = String(source || "").toLowerCase();
   const idx = CSV_SOURCE_ORDER.indexOf(src);
   return idx === -1 ? CSV_SOURCE_ORDER.length : idx;
 }
 
+/**
+ * Write one combined CSV with the latest qualifying jobs from all sources.
+ * @returns {{ csvPath: string, latestPath: string, count: number }}
+ */
 export function syncCsv(rows = null) {
   const all = rows || allJobs();
   const clean = (all || []).filter((j) => matchesOutputRule(j));
-  // Source order first (JobRight last), then newest first within each source.
   clean.sort((a, b) => {
     const bySource = csvSourceRank(a.source) - csvSourceRank(b.source);
     if (bySource !== 0) return bySource;

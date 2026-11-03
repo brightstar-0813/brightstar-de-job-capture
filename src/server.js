@@ -47,6 +47,12 @@ app.get("/api/status", (_req, res) => {
       captureJobright: config.captureJobright,
       captureBuiltin: config.captureBuiltin,
       captureGreenhouse: config.captureGreenhouse,
+      captureLever: config.captureLever,
+      captureAshby: config.captureAshby,
+      captureHimalayas: config.captureHimalayas,
+      captureRemotive: config.captureRemotive,
+      captureRemoteok: config.captureRemoteok,
+      captureWwr: config.captureWwr,
       captureZiprecruiter: config.captureZiprecruiter,
       captureMonster: config.captureMonster,
     });

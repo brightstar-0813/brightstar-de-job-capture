@@ -2,7 +2,7 @@
  * Ingest jobs from Chrome extension (JobRight logged-in session).
  */
 
-import { matchesCaptureRule } from "./filter.js";
+import { captureRuleReason } from "./filter.js";
 import {
   beginRun,
   finishRun,
@@ -35,7 +35,8 @@ export async function ingestJobsPayload(jobs, opts = {}) {
       counts.skippedCount += 1;
       continue;
     }
-    if (!matchesCaptureRule(job)) {
+    const reason = captureRuleReason(job);
+    if (reason) {
       counts.skippedCount += 1;
       continue;
     }

@@ -106,23 +106,59 @@ export function isUsEligible(job) {
   return true;
 }
 
-/**
- * Final capture decision: data-engineering title + remote + US.
- * @param {{ title?: string, description?: string, organization?: string, work_arrangement?: string, location?: string, remote_restricted_to?: string }} job
- */
-export function matchesCaptureRule(job) {
-  if (!job) return false;
-  if (!isRemoteArrangement(job.work_arrangement)) return false;
-  if (!isUsEligible(job)) return false;
-  return isDataEngTitle(job.title, job.description);
+/** Cheap listing-title prefilter (Dice stubs) before detail scrape. */
+export function looksDataEngTitle(title) {
+  return isDataEngTitle(title);
 }
 
-export function filterAiJobs(jobs) {
-  return (jobs || []).filter((j) => matchesCaptureRule(j));
+export function stripHtml(html) {
+  return String(html || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function isLinkedinLink(...links) {
   return links.some((l) => /linkedin\.com/i.test(String(l || "")));
+}
+
+/**
+ * Why a job fails the capture rule, or null when it should be kept.
+ * @returns {string|null}
+ */
+export function captureRuleReason(job) {
+  if (!job) return "empty";
+  if (!isRemoteArrangement(job.work_arrangement)) return "not remote";
+  if (!isUsEligible(job)) return "location not US";
+  if (!isDataEngTitle(job.title, job.description)) {
+    return "not data engineering title";
+  }
+  if (isLinkedinLink(job.url)) return "LinkedIn URL excluded";
+  return null;
+}
+
+/**
+ * Final capture decision: data-engineering title + remote + US.
+ * @param {{ title?: string, description?: string, organization?: string, work_arrangement?: string, location?: string, remote_restricted_to?: string, url?: string }} job
+ */
+export function matchesCaptureRule(job) {
+  return captureRuleReason(job) == null;
+}
+
+export function filterAiJobs(jobs) {
+  return (jobs || []).filter((j) => matchesCaptureRule(j));
 }
 
 /**

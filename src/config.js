@@ -24,6 +24,10 @@ function parseCsvList(raw, fallback) {
   return fallback;
 }
 
+function csvList(name, fallback) {
+  return parseCsvList(process.env[name], fallback);
+}
+
 const DEFAULT_SEARCH_QUERIES = [
   "Data Engineer",
   "Senior Data Engineer",
@@ -61,13 +65,14 @@ export const config = {
   /** Primary query label (logging / API status). */
   searchQ: process.env.SEARCH_Q || "Data Engineer",
   /**
-   * Discovery queries for Dice / Built In / Monster / ZipRecruiter.
-   * Discovery queries for Data Engineer family listings.
+   * Discovery queries for Dice / Built In / Himalayas / Remotive / …
    * Override with SEARCH_QUERIES (comma-separated).
    */
   searchQueries: parseCsvList(process.env.SEARCH_QUERIES, DEFAULT_SEARCH_QUERIES),
   maxPages: Math.max(1, Number(process.env.MAX_PAGES || 5)),
-  /** Only capture/keep jobs posted within this many days (both sources). */
+  /** Extra pages for secondary queries on feed APIs (Himalayas). */
+  searchExtraPages: Math.max(1, Number(process.env.SEARCH_EXTRA_PAGES || 2)),
+  /** Only capture/keep jobs posted within this many days. */
   recentDays: Math.max(1, Number(process.env.RECENT_DAYS || 3)),
   pageSize: Math.max(1, Math.min(100, Number(process.env.PAGE_SIZE || 20))),
   headless: bool("HEADLESS", true),
@@ -78,78 +83,140 @@ export const config = {
   captureJobright: bool("CAPTURE_JOBRIGHT", true),
   captureBuiltin: bool("CAPTURE_BUILTIN", true),
   captureGreenhouse: bool("CAPTURE_GREENHOUSE", true),
-  /** Often Cloudflare-blocked in headless — on by default but may yield 0. */
-  captureZiprecruiter: bool("CAPTURE_ZIPRECRUITER", true),
-  /** Often empty/blocked in headless — on by default but may yield 0. */
-  captureMonster: bool("CAPTURE_MONSTER", true),
+  captureLever: bool("CAPTURE_LEVER", true),
+  captureAshby: bool("CAPTURE_ASHBY", true),
+  captureHimalayas: bool("CAPTURE_HIMALAYAS", true),
+  captureRemotive: bool("CAPTURE_REMOTIVE", true),
+  captureRemoteok: bool("CAPTURE_REMOTEOK", true),
+  captureWwr: bool("CAPTURE_WWR", true),
+  /** Often Cloudflare-blocked in headless — off by default (prefer public APIs). */
+  captureZiprecruiter: bool("CAPTURE_ZIPRECRUITER", false),
+  /** Often empty/blocked in headless — off by default (prefer public APIs). */
+  captureMonster: bool("CAPTURE_MONSTER", false),
   /**
-   * Greenhouse board tokens (boards.greenhouse.io/{token}). No global search —
-   * we poll these company boards and keep US-remote data-engineering matches.
+   * Greenhouse board tokens (boards.greenhouse.io/{token}).
+   * Data-platform / analytics-leaning employers.
    */
-  greenhouseBoards: String(
-    process.env.GREENHOUSE_BOARDS ||
-      [
-        "affirm",
-        "stripe",
-        "datadog",
-        "notion",
-        "figma",
-        "hubspot",
-        "twilio",
-        "snowflakecomputing",
-        "gitlab",
-        "cloudflare",
-        "doordash",
-        "instacart",
-        "asana",
-        "coinbase",
-        "gusto",
-        "rippling",
-        "ramp",
-        "brex",
-        "airbnb",
-        "dropbox",
-        "boxinc",
-        "zendesk",
-        "plaid",
-        "calendly",
-        "canva",
-        "discord",
-        "robinhood",
-        "square",
-        "block",
-        "okta",
-        "hashicorp",
-        "databricks",
-        "mongodb",
-        "elastic",
-        "confluent",
-        "fivetran",
-        "airbytehq",
-        "dbtlabs",
-        "prefect",
-        "astronomer",
-        "palantir",
-        "docusign",
-        "smartsheet",
-        "qualtrics",
-        "surveymonkey",
-        "duolingo",
-        "grammarly",
-        "coursera",
-        "udemy",
-        "khanacademy",
-        "vanta",
-        "mercury",
-        "flexport",
-        "shippo",
-        "faire",
-        "whatnot",
-      ].join(",")
-  )
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
+  greenhouseBoards: csvList("GREENHOUSE_BOARDS", [
+    "affirm",
+    "stripe",
+    "datadog",
+    "notion",
+    "figma",
+    "hubspot",
+    "twilio",
+    "snowflakecomputing",
+    "gitlab",
+    "cloudflare",
+    "doordash",
+    "instacart",
+    "asana",
+    "coinbase",
+    "gusto",
+    "rippling",
+    "ramp",
+    "brex",
+    "airbnb",
+    "dropbox",
+    "boxinc",
+    "zendesk",
+    "plaid",
+    "calendly",
+    "canva",
+    "discord",
+    "robinhood",
+    "square",
+    "block",
+    "okta",
+    "hashicorp",
+    "databricks",
+    "mongodb",
+    "elastic",
+    "confluent",
+    "fivetran",
+    "airbytehq",
+    "dbtlabs",
+    "prefect",
+    "astronomer",
+    "palantir",
+    "docusign",
+    "smartsheet",
+    "qualtrics",
+    "surveymonkey",
+    "duolingo",
+    "grammarly",
+    "coursera",
+    "udemy",
+    "khanacademy",
+    "vanta",
+    "mercury",
+    "flexport",
+    "shippo",
+    "faire",
+    "whatnot",
+  ]),
+  /**
+   * Lever company tokens (jobs.lever.co/{token}).
+   */
+  leverBoards: csvList("LEVER_BOARDS", [
+    "databricks",
+    "snowflake",
+    "stripe",
+    "twilio",
+    "zendesk",
+    "okta",
+    "hubspot",
+    "gitlab",
+    "cloudflare",
+    "datadog",
+    "airbnb",
+    "coinbase",
+    "robinhood",
+    "plaid",
+    "brex",
+    "ramp",
+    "gusto",
+    "rippling",
+    "intercom",
+    "asana",
+    "palantir",
+    "notion",
+    "figma",
+    "canva",
+    "vercel",
+    "linear",
+    "anthropic",
+    "openai",
+    "netflix",
+    "posthog",
+    "retool",
+    "scaleai",
+  ]),
+  /**
+   * Ashby job-board tokens (jobs.ashbyhq.com/{token}).
+   */
+  ashbyBoards: csvList("ASHBY_BOARDS", [
+    "databricks",
+    "snowflake",
+    "ramp",
+    "notion",
+    "linear",
+    "vercel",
+    "openai",
+    "anthropic",
+    "rippling",
+    "vanta",
+    "mercury",
+    "brex",
+    "plaid",
+    "asana",
+    "figma",
+    "canva",
+    "intercom",
+    "retool",
+    "cursor",
+    "posthog",
+  ]),
   jobrightAuthPath: path.resolve(
     root,
     process.env.JOBRIGHT_AUTH_PATH || path.join("download", "jobright-auth.json")
@@ -158,7 +225,10 @@ export const config = {
     root,
     process.env.DICE_AUTH_PATH || path.join("download", "dice-auth.json")
   ),
-  jobrightMaxPages: Math.max(1, Number(process.env.JOBRIGHT_MAX_PAGES || process.env.MAX_PAGES || 5)),
+  jobrightMaxPages: Math.max(
+    1,
+    Number(process.env.JOBRIGHT_MAX_PAGES || process.env.MAX_PAGES || 5)
+  ),
   /**
    * JobRight search SEEDS (not title filters). Keep/skip is the capture
    * rule: US remote + Data Engineer-family title.
@@ -175,19 +245,37 @@ export const SOURCE_IDS = [
   "jobright",
   "builtin",
   "greenhouse",
+  "lever",
+  "ashby",
+  "himalayas",
+  "remotive",
+  "remoteok",
+  "wwr",
   "ziprecruiter",
   "monster",
 ];
 
-/** CSV row order — JobRight last so those jobs sit at the bottom of jobs_latest.csv. */
-export const CSV_SOURCE_ORDER = [
-  "dice",
+/**
+ * Preferred posting when the same role appears on several boards.
+ * Lower index = higher priority.
+ */
+export const SOURCE_PRIORITY = [
   "builtin",
+  "himalayas",
   "greenhouse",
+  "dice",
+  "lever",
+  "ashby",
+  "remotive",
+  "remoteok",
+  "wwr",
   "ziprecruiter",
   "monster",
   "jobright",
 ];
+
+/** CSV row order — mirrors SOURCE_PRIORITY (JobRight last). */
+export const CSV_SOURCE_ORDER = [...SOURCE_PRIORITY];
 
 export const CSV_HEADERS = [
   "id",

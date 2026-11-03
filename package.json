@@ -1,7 +1,7 @@
 {
-  "name": "ai-jobs-capture",
-  "version": "1.0.0",
-  "description": "Capture US-remote data engineering jobs from Dice and other sources daily at 5 AM and 5 PM — CSV + Slack + Chrome extension UI",
+  "name": "de-jobs-capture",
+  "version": "1.1.0",
+  "description": "Capture US-remote data engineering jobs from ATS feeds, Dice, Built In, and JobRight — CSV + Slack + Chrome extension UI",
   "type": "module",
   "main": "src/capture.js",
   "scripts": {
