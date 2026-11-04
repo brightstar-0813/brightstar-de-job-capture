@@ -425,7 +425,7 @@ export function pruneStore() {
 }
 
 /**
- * Permanently remove stored jobs by id (e.g. already-applied JobRight/Dice).
+ * Permanently remove stored jobs by id.
  * @param {Iterable<string>} ids
  * @returns {{ removed: number, kept: number }}
  */

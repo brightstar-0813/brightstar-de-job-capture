@@ -1,10 +1,10 @@
 /**
- * Remotive public API — remote jobs matching data-engineering searches.
+ * Remotive public API — remote jobs filtered client-side to data engineering.
+ * Search query param is weak (returns unrelated hits); pull category feeds instead.
  * https://remotive.com/api/remote-jobs
  */
 
-import { config } from "../config.js";
-import { getJson } from "../http.js";
+import { getJsonPreferCurl } from "../curl.js";
 import { stripHtml } from "../filter.js";
 import {
   emptySkipCounts,
@@ -13,11 +13,11 @@ import {
   logKept,
 } from "../feeds/keep.js";
 
-function queries() {
-  return config.searchQueries?.length
-    ? config.searchQueries
-    : [config.searchQ || "Data Engineer"];
-}
+const ENDPOINTS = [
+  "https://remotive.com/api/remote-jobs?category=software-dev",
+  "https://remotive.com/api/remote-jobs?category=data",
+  "https://remotive.com/api/remote-jobs",
+];
 
 function mapJob(j) {
   const location = j.candidate_required_location || "";
@@ -48,17 +48,17 @@ export async function searchRemotiveJobs() {
   const counts = emptySkipCounts();
   let scanned = 0;
 
-  for (const q of queries()) {
-    const url = `https://remotive.com/api/remote-jobs?search=${encodeURIComponent(q)}`;
+  for (const url of ENDPOINTS) {
     console.log(`[remotive] ${url}`);
     let json;
     try {
-      json = await getJson(url);
+      json = await getJsonPreferCurl(url, { timeoutMs: 45000 });
     } catch (err) {
-      console.warn(`[remotive] query "${q}" failed: ${err.message}`);
+      console.warn(`[remotive] ${url} failed: ${err.message}`);
       continue;
     }
     const list = Array.isArray(json?.jobs) ? json.jobs : [];
+    console.log(`[remotive] jobs=${list.length}`);
     for (const raw of list) {
       if (!raw?.id || seen.has(raw.id)) continue;
       seen.add(raw.id);

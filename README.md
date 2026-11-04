@@ -2,7 +2,7 @@
 
 Capture **US-remote data engineering** jobs from public ATS/feeds (Greenhouse, Lever, Ashby, Himalayas, Remotive, Remote OK, WWR) plus Dice, Built In, and JobRight — **twice daily (5:00 AM and 5:00 PM local time)**, append/dedupe locally, write **dated CSVs**, and Slack-notify on new jobs.
 
-Aligned with the Salesforce capture bot’s feed-first architecture: parallel public APIs, fingerprint dedupe across boards, and API-first JobRight discovery.
+Feed-first / HTTP-first: parallel public APIs and curl (Cloudflare-friendly). Playwright is only used for optional ZipRecruiter/Monster.
 
 ## What gets saved
 
@@ -15,27 +15,26 @@ Filter (applied to all sources):
 
 - **Keep:** **US remote only** (not hybrid or on-site; not UK/EU/India/etc.) and title is a **Data Engineer** family role (`Senior Data Engineer`, `Analytics Engineer`, `ETL Engineer`, `Data Platform Engineer`, `Big Data Engineer`, `Databricks Engineer`, …). Posted within the last `RECENT_DAYS` days (default 3). Greenhouse/Lever/Ashby stay while still listed on the live board.
 - **Skip:** generic SWE/ML/scientist/analyst titles; non-eng titles; **hybrid/on-site**; **non-US** locations; **LinkedIn** URLs; expired postings; stale non-ATS posts.
-- **Skip (already applied):** JobRight applied list (optional saved login) and Dice Applied tab (optional `dice:login`).
+- Already-applied filtering is **not** used — the CSV is shared across people.
 
 ## Sources
 
 | Source | How it runs | Notes |
 |--------|-------------|-------|
-| **Built In** | Playwright | Remote keyword search |
-| **Himalayas / Remotive / Remote OK / WWR** | Public API / RSS | No browser; parallel |
+| **Built In** | curl HTML | Listing + detail pages (JSON retrieval API is empty) |
+| **Himalayas / Remotive / Remote OK / WWR** | Public API / RSS | curl-friendly; parallel; no browser |
 | **Greenhouse / Lever / Ashby** | Public board APIs | Curated company tokens; concurrent (`mapPool`) |
-| **Dice** | Playwright | Optional login for applied exclusion; title prefilter before detail |
-| **JobRight** | HTTP API | Discovery needs **no login**; optional `jobright:login` only for applied exclusion |
+| **Dice** | Public job-search API | curl + web client key; no browser for discovery |
+| **JobRight** | HTTP API | curl + `SESSION_ID` from `jobright:login` |
 | **ZipRecruiter / Monster** | Playwright | **Off by default** (often blocked) |
 
-### Optional: skip already-applied Dice / JobRight jobs
+### JobRight session (required for JobRight source)
 
 ```bash
-npm run dice:login
 npm run jobright:login
 ```
 
-JobRight discovery still works without login. When the saved session expires you get a Slack alert; capture continues without applied-job exclusion.
+JobRight’s search API needs a `SESSION_ID` cookie from that login file. When it expires you get a Slack alert and JobRight returns 0 until you re-login.
 
 ### Chrome extension (optional)
 

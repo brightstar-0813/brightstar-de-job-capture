@@ -1,6 +1,6 @@
 /**
  * JobRight content script — extract US-remote data engineering jobs via
- * POST /swan/recommend/search (skip LinkedIn / applied / non-remote / expired).
+ * POST /swan/recommend/search (skip LinkedIn / non-remote / expired).
  *
  * Wrapped in a guarded IIFE: this file is both a manifest content_script AND
  * injected on demand via chrome.scripting.executeScript. Without the guard the
@@ -243,39 +243,6 @@ async function fetchRecommendJobs(query, count = 50) {
   };
 }
 
-async function fetchAppliedJobIds() {
-  const ids = new Set();
-  let cursor = null;
-  for (let i = 0; i < 20; i += 1) {
-    let res;
-    try {
-      res = await fetch("https://jobright.ai/swan/job/applied/jobs-v3", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/plain, */*",
-          "x-client-type": "web",
-        },
-        body: JSON.stringify({ cursor, pageSize: 50, applyStatus: 0 }),
-        credentials: "include",
-      });
-    } catch {
-      break;
-    }
-    if (!res.ok) break;
-    const json = await res.json().catch(() => null);
-    const result = json?.result || {};
-    const list = Array.isArray(result.list) ? result.list : [];
-    for (const it of list) {
-      const jobId = it?.jobResult?.jobId || it?.jobId;
-      if (jobId) ids.add(`jobright_${jobId}`);
-    }
-    if (!result.hasMore || !result.cursor) break;
-    cursor = result.cursor;
-  }
-  return ids;
-}
-
 async function ensureSearch(query) {
   const q = query || "Data Engineer";
   if (/value=/i.test(location.href)) return;
@@ -303,15 +270,9 @@ async function scrapeJobrightJobs(titles) {
   const byId = new Map();
   let apiCount = 0;
   let skippedLinkedin = 0;
-  let skippedApplied = 0;
   let skippedStale = 0;
   let skippedExpired = 0;
-  let appliedTotal = 0;
   let okQueries = 0;
-
-  // Applied list once per run (same session cookies).
-  const appliedIds = await fetchAppliedJobIds();
-  appliedTotal = appliedIds.size;
 
   for (const query of listTitles) {
     await ensureSearch(query);
@@ -335,10 +296,6 @@ async function scrapeJobrightJobs(titles) {
 
       if (mapped._expired) {
         skippedExpired += 1;
-        continue;
-      }
-      if (appliedIds.has(mapped.id)) {
-        skippedApplied += 1;
         continue;
       }
       if (isLinkedinApply(mapped)) {
@@ -385,10 +342,8 @@ async function scrapeJobrightJobs(titles) {
       titles: listTitles.length,
       kept: kept.length,
       skippedLinkedin,
-      skippedApplied,
       skippedStale,
       skippedExpired,
-      appliedTotal,
       csVersion: CS_VERSION,
       href: location.href,
     },

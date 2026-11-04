@@ -169,22 +169,3 @@ export async function notifyJobrightLoginExpired({ webhookUrl, runId }) {
   await postSlackMessage(webhookUrl, text);
   return { ok: true };
 }
-
-/**
- * Alert that the saved Dice login has expired, so already-applied Dice jobs
- * can't be excluded this run (they may reappear until you re-login).
- * @param {{ webhookUrl: string, runId?: number }} opts
- */
-export async function notifyDiceLoginExpired({ webhookUrl, runId }) {
-  if (!webhookUrl || !isSlackWebhookUrl(webhookUrl)) {
-    return { skipped: true, reason: "no_webhook" };
-  }
-  const runTag = runId != null ? ` (run #${runId})` : "";
-  const text =
-    `:warning: *Dice login expired*${runTag}\n` +
-    `Dice jobs were still captured, but already-applied jobs could not be excluded ` +
-    `(they may reappear in results until you re-login).\n` +
-    `Fix: run \`npm run dice:login\` to refresh the saved session.`;
-  await postSlackMessage(webhookUrl, text);
-  return { ok: true };
-}

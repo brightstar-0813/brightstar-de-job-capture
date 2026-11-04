@@ -47,7 +47,7 @@ const FETCH_HEADERS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 };
 
-export async function getText(urlString, { timeoutMs = 20000 } = {}) {
+export async function getText(urlString, { timeoutMs = 60000 } = {}) {
   const res = await fetch(urlString, {
     headers: FETCH_HEADERS,
     signal: AbortSignal.timeout(timeoutMs),
@@ -67,7 +67,7 @@ export async function getJson(urlString, opts = {}) {
 /** Like getJson, but returns { ok, status, json } without throwing on HTTP errors. */
 export async function tryGetJson(
   urlString,
-  { timeoutMs = 20000, headers = {} } = {}
+  { timeoutMs = 60000, headers = {} } = {}
 ) {
   try {
     const res = await fetch(urlString, {

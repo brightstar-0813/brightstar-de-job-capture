@@ -1,15 +1,14 @@
 /**
  * Capture US-remote data engineering jobs — public APIs/feeds first
  * (Greenhouse, Lever, Ashby, Himalayas, Remotive, Remote OK, WWR),
- * plus Dice, Built In, and JobRight (API-first). ZipRecruiter/Monster
- * stay off by default (often blocked in headless).
+ * plus Dice, Built In, and JobRight over HTTP/curl (no browser required
+ * for discovery). ZipRecruiter/Monster stay off by default.
  */
 
 import { chromium } from "playwright";
 import { config } from "./config.js";
 import { browserLaunchOptions } from "./browser.js";
 import { searchDiceJobs } from "./dice/search.js";
-import { scrapeJobDetails } from "./dice/detail.js";
 import { searchJobrightJobs } from "./jobright/search.js";
 import { searchBuiltinJobs } from "./builtin/search.js";
 import { searchGreenhouseJobs } from "./greenhouse/search.js";
@@ -21,7 +20,7 @@ import { searchRemoteokJobs } from "./remoteok/search.js";
 import { searchWwrJobs } from "./wwr/search.js";
 import { searchZiprecruiterJobs } from "./ziprecruiter/search.js";
 import { searchMonsterJobs } from "./monster/search.js";
-import { captureRuleReason, looksDataEngTitle } from "./filter.js";
+import { captureRuleReason } from "./filter.js";
 import {
   beginRun,
   finishRun,
@@ -30,13 +29,11 @@ import {
   closeStore,
   getMeta,
   pruneStore,
-  removeJobs,
   repairJobrightUrls,
 } from "./store.js";
 import {
   notifyCaptureComplete,
   notifyJobrightLoginExpired,
-  notifyDiceLoginExpired,
 } from "./slack.js";
 
 let running = false;
@@ -89,26 +86,52 @@ async function runNamedSource(name, fn) {
   }
 }
 
-async function collectFeedJobs() {
-  const runners = [];
-  if (config.captureHimalayas) runners.push(["himalayas", searchHimalayasJobs]);
-  if (config.captureGreenhouse) runners.push(["greenhouse", searchGreenhouseJobs]);
-  if (config.captureLever) runners.push(["lever", searchLeverJobs]);
-  if (config.captureAshby) runners.push(["ashby", searchAshbyJobs]);
-  if (config.captureRemotive) runners.push(["remotive", searchRemotiveJobs]);
-  if (config.captureRemoteok) runners.push(["remoteok", searchRemoteokJobs]);
-  if (config.captureWwr) runners.push(["wwr", searchWwrJobs]);
-  if (!runners.length) return [];
-
-  const batches = await Promise.all(
-    runners.map(async ([name, fn]) => {
+async function runPool(runners, concurrency) {
+  const out = [];
+  let i = 0;
+  async function worker() {
+    while (i < runners.length) {
+      const idx = i;
+      i += 1;
+      const [name, fn] = runners[idx];
       const result = await runNamedSource(name, fn);
       const jobs = result?.jobs || [];
       console.log(`[capture] ${name} jobs: ${jobs.length}`);
-      return jobs;
-    })
-  );
-  return batches.flat();
+      out[idx] = { name, result, jobs };
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, runners.length || 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return out.filter(Boolean);
+}
+
+async function collectFeedJobs() {
+  // Node-fetch ATS/feeds — fine in parallel.
+  const fetchRunners = [];
+  if (config.captureHimalayas) fetchRunners.push(["himalayas", searchHimalayasJobs]);
+  if (config.captureGreenhouse) {
+    fetchRunners.push(["greenhouse", searchGreenhouseJobs]);
+  }
+  if (config.captureLever) fetchRunners.push(["lever", searchLeverJobs]);
+  if (config.captureAshby) fetchRunners.push(["ashby", searchAshbyJobs]);
+  if (config.captureRemotive) fetchRunners.push(["remotive", searchRemotiveJobs]);
+  if (config.captureRemoteok) fetchRunners.push(["remoteok", searchRemoteokJobs]);
+
+  // curl sources — limit concurrency; Cloudflare rate-limits burst traffic.
+  const curlRunners = [];
+  if (config.captureWwr) curlRunners.push(["wwr", searchWwrJobs]);
+  if (config.captureBuiltin) curlRunners.push(["builtin", searchBuiltinJobs]);
+  if (config.captureDice) curlRunners.push(["dice", searchDiceJobs]);
+  if (config.captureJobright) curlRunners.push(["jobright", searchJobrightJobs]);
+
+  const fetchBatches = await runPool(fetchRunners, 6);
+  const curlBatches = await runPool(curlRunners, 2);
+  return [...fetchBatches, ...curlBatches];
+}
+
+function needsBrowser() {
+  // Discovery is HTTP/curl. Playwright only for optional ZipRecruiter/Monster.
+  return config.captureZiprecruiter || config.captureMonster;
 }
 
 export async function runCapture({ skipSlack = false } = {}) {
@@ -120,7 +143,6 @@ export async function runCapture({ skipSlack = false } = {}) {
   const counts = { newCount: 0, updatedCount: 0, skippedCount: 0 };
   const newJobs = [];
   let jobrightAuthExpired = false;
-  let diceAuthExpired = false;
   const enabled = enabledSources();
 
   console.log(
@@ -135,47 +157,27 @@ export async function runCapture({ skipSlack = false } = {}) {
   process.on("unhandledRejection", swallowTransient);
 
   try {
-    const feedPromise = collectFeedJobs();
-
-    browser = await chromium.launch(browserLaunchOptions(config.headless));
-
-    if (config.captureBuiltin) {
-      await runNamedSource("builtin", async () => {
-        const { jobs } = await searchBuiltinJobs(browser);
-        console.log(`[capture] builtin jobs: ${jobs.length}`);
-        ingestJobs(jobs, runId, counts, newJobs);
-      });
+    const useBrowser = needsBrowser();
+    if (useBrowser) {
+      browser = await chromium.launch(browserLaunchOptions(config.headless));
+    } else {
+      console.log(`[capture] API/curl mode — no Playwright browser`);
     }
 
-    if (config.captureDice) {
-      await runNamedSource("dice", async () => {
-        const { jobs: stubs, appliedIds: diceApplied, unauthenticated } =
-          await searchDiceJobs(browser);
-        diceAuthExpired = !!unauthenticated;
-        const relevant = stubs.filter((s) => looksDataEngTitle(s.title));
-        const skippedTitle = stubs.length - relevant.length;
-        console.log(
-          `[capture] dice listings: ${stubs.length}` +
-            (skippedTitle
-              ? ` (skip ${skippedTitle} unrelated titles before detail)`
-              : "")
-        );
-        const details = await scrapeJobDetails(browser, relevant);
-        console.log(`[capture] dice details: ${details.length}`);
-        ingestJobs(details, runId, counts, newJobs);
-
-        if (Array.isArray(diceApplied) && diceApplied.length) {
-          const { removed } = removeJobs(diceApplied);
-          if (removed > 0) {
-            console.log(
-              `[capture] removed ${removed} already-applied dice jobs from store`
-            );
-          }
-        }
-      });
+    // Parallel public HTTP sources (includes Built In / Dice / JobRight).
+    const feedBatches = await collectFeedJobs();
+    for (const batch of feedBatches) {
+      if (!batch) continue;
+      if (batch.name === "jobright") {
+        jobrightAuthExpired = !!batch.result?.auth?.unauthenticated;
+      }
+      if (batch.jobs?.length) {
+        ingestJobs(batch.jobs, runId, counts, newJobs);
+      }
     }
 
-    if (config.captureZiprecruiter) {
+    // Optional browser-only boards (off by default).
+    if (browser && config.captureZiprecruiter) {
       await runNamedSource("ziprecruiter", async () => {
         const { jobs, blocked } = await searchZiprecruiterJobs(browser);
         console.log(
@@ -185,38 +187,13 @@ export async function runCapture({ skipSlack = false } = {}) {
       });
     }
 
-    if (config.captureMonster) {
+    if (browser && config.captureMonster) {
       await runNamedSource("monster", async () => {
         const { jobs, blocked } = await searchMonsterJobs(browser);
         console.log(
           `[capture] monster jobs: ${jobs.length}${blocked ? " (blocked)" : ""}`
         );
         ingestJobs(jobs, runId, counts, newJobs);
-      });
-    }
-
-    const feedJobs = await feedPromise;
-    if (feedJobs.length) {
-      ingestJobs(feedJobs, runId, counts, newJobs);
-    }
-
-    // JobRight last — CSV / fingerprint priority also ranks it lowest.
-    if (config.captureJobright) {
-      await runNamedSource("jobright", async () => {
-        const { jobs: jrJobs, auth, appliedIds } =
-          await searchJobrightJobs(browser);
-        console.log(`[capture] jobright jobs: ${jrJobs.length}`);
-        jobrightAuthExpired = !!auth?.unauthenticated;
-        ingestJobs(jrJobs, runId, counts, newJobs);
-
-        if (Array.isArray(appliedIds) && appliedIds.length) {
-          const { removed } = removeJobs(appliedIds);
-          if (removed > 0) {
-            console.log(
-              `[capture] removed ${removed} already-applied jobright jobs from store`
-            );
-          }
-        }
       });
     }
 
@@ -252,12 +229,6 @@ export async function runCapture({ skipSlack = false } = {}) {
         });
         if (jobrightAuthExpired) {
           await notifyJobrightLoginExpired({
-            webhookUrl: config.slackWebhookUrl,
-            runId,
-          });
-        }
-        if (diceAuthExpired) {
-          await notifyDiceLoginExpired({
             webhookUrl: config.slackWebhookUrl,
             runId,
           });

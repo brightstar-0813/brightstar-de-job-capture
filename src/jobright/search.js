@@ -1,12 +1,11 @@
 /**
  * JobRight.ai data-engineering search — remote US roles via recommend/search API.
- * Discovery needs no login. Optional saved session still excludes already-applied
- * jobs (Playwright + jobright-auth.json).
+ * Discovery uses curl + SESSION_ID from jobright-auth.json (no Playwright).
+ * Does not filter by already-applied — CSV is shared across people.
  */
 
 import fs from "fs";
 import { config } from "../config.js";
-import { contextOptions } from "../browser.js";
 import {
   isDataEngTitle,
   isUsEligible,
@@ -19,7 +18,10 @@ import {
   pickJobrightJobUrl,
   buildJobrightDescription,
 } from "./url.js";
-import { fetchRecommendSearch } from "./client.js";
+import {
+  fetchRecommendSearch,
+  hasJobrightSessionCookie,
+} from "./client.js";
 
 export function buildJobrightSearchUrl(page = 1, query = config.searchQ) {
   const taxonomy = encodeURIComponent(
@@ -100,95 +102,23 @@ function isTargetJob(mapped) {
   );
 }
 
-async function fetchAppliedJobIds(page) {
-  return page.evaluate(async () => {
-    const ids = [];
-    let cursor = null;
-    let ok = true;
-    for (let i = 0; i < 20; i += 1) {
-      const res = await fetch("https://jobright.ai/swan/job/applied/jobs-v3", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/plain, */*",
-          "x-client-type": "web",
-        },
-        body: JSON.stringify({ cursor, pageSize: 50, applyStatus: 0 }),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        ok = false;
-        break;
-      }
-      const json = await res.json().catch(() => null);
-      const result = json?.result || {};
-      const list = Array.isArray(result.list) ? result.list : [];
-      for (const it of list) {
-        const jobId = it?.jobResult?.jobId || it?.jobId;
-        if (jobId) ids.push(`jobright_${jobId}`);
-      }
-      if (!result.hasMore || !result.cursor) break;
-      cursor = result.cursor;
-    }
-    return { ok, ids };
-  });
-}
-
 /**
- * Optional: load already-applied JobRight ids when a saved login exists.
- * @param {import('playwright').Browser} browser
+ * Fetch remote data-engineering jobs from JobRight API (curl + cookies).
  */
-async function loadAppliedIds(browser) {
-  const hasAuth = fs.existsSync(config.jobrightAuthPath);
-  if (!hasAuth || !browser) {
-    return { appliedIds: new Set(), unauthenticated: !hasAuth, hadAuthFile: hasAuth };
-  }
-  const context = await browser.newContext(
-    contextOptions({ storageState: config.jobrightAuthPath })
-  );
-  const page = await context.newPage();
-  try {
-    await page.goto("https://jobright.ai/jobs", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
-    await page.waitForTimeout(2000);
-    const applied = await fetchAppliedJobIds(page).catch(() => null);
-    if (applied?.ok) {
-      console.log(
-        `[jobright] already-applied jobs to exclude: ${applied.ids.length}`
-      );
-      return {
-        appliedIds: new Set(applied.ids),
-        unauthenticated: false,
-        hadAuthFile: true,
-      };
-    }
+export async function searchJobrightJobs() {
+  console.log(`[jobright] API discovery via curl + saved session cookie`);
+
+  const hadAuthFile = fs.existsSync(config.jobrightAuthPath);
+  if (!hasJobrightSessionCookie()) {
     console.warn(
-      `[jobright] session unauthenticated (login missing or expired) — run: npm run jobright:login`
+      `[jobright] no SESSION_ID — run: npm run jobright:login`
     );
-    return { appliedIds: new Set(), unauthenticated: true, hadAuthFile: true };
-  } finally {
-    await context.close().catch(() => {});
   }
-}
-
-/**
- * Fetch remote data-engineering jobs from JobRight API.
- * @param {import('playwright').Browser} [browser] used only for optional applied exclusion
- */
-export async function searchJobrightJobs(browser) {
-  console.log(`[jobright] API-first discovery (login only for applied exclusion)`);
-
-  const { appliedIds, unauthenticated, hadAuthFile } = await loadAppliedIds(
-    browser
-  );
 
   const all = [];
   const seen = new Set();
   let nonRemoteSkipped = 0;
   let nonDeSkipped = 0;
-  let appliedSkipped = 0;
   let staleSkipped = 0;
   let expiredSkipped = 0;
   let linkedinSkipped = 0;
@@ -234,10 +164,6 @@ export async function searchJobrightJobs(browser) {
           expiredSkipped += 1;
           continue;
         }
-        if (appliedIds.has(mapped.id)) {
-          appliedSkipped += 1;
-          continue;
-        }
         if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
           linkedinSkipped += 1;
           continue;
@@ -271,18 +197,18 @@ export async function searchJobrightJobs(browser) {
       ` (titles=${titles.length}, api=${apiCount}, okQueries=${queryOkCount}/${titles.length},` +
       ` skipped LinkedIn=${linkedinSkipped},` +
       ` skipped non-remote=${nonRemoteSkipped}, skipped non-DE/non-US=${nonDeSkipped},` +
-      ` skipped already-applied=${appliedSkipped}, skipped expired=${expiredSkipped},` +
+      ` skipped expired=${expiredSkipped},` +
       ` skipped stale(>${config.recentDays}d)=${staleSkipped})`
   );
 
   return {
     jobs: all,
-    appliedIds: Array.from(appliedIds),
     auth: {
       hadAuthFile,
       attempts: titles.length,
       okQueries: queryOkCount,
-      unauthenticated: hadAuthFile && unauthenticated,
+      // Discovery needs SESSION_ID; surface expired login when all queries fail.
+      unauthenticated: queryOkCount === 0 && hadAuthFile,
     },
   };
 }

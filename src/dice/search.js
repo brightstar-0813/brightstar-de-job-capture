@@ -1,15 +1,26 @@
 /**
- * Dice search listing helpers.
+ * Dice — public job-search API (no browser).
+ * Uses Dice's web client API key via curl (Node fetch is API-gateway blocked).
  */
 
-import fs from "fs";
 import { config } from "../config.js";
-import { collectDiceAppliedIds } from "./applied.js";
+import { curlGetJson } from "../curl.js";
+import {
+  emptySkipCounts,
+  isoDate,
+  keepFeedJob,
+  logKept,
+} from "../feeds/keep.js";
+
+/** Public web client key embedded in dice.com (rotated rarely). */
+const DICE_API_KEY =
+  process.env.DICE_API_KEY || "1YAt0R9wBg4WfsF9VB2778F5CHLAPMVW3WAZcKd8";
+
+const DICE_API =
+  "https://job-search-api.svc.dhigroupinc.com/v1/dice/jobs/search";
 
 /**
- * Map a recency window (days) to Dice's coarse postedDate token. Dice only
- * supports ONE / THREE / SEVEN / THIRTY, so we pick the smallest bucket that
- * still covers the requested window; exact-day filtering happens client-side.
+ * Map a recency window (days) to Dice's coarse postedDate token.
  */
 export function postedDateToken(days) {
   const d = Math.max(1, Number(days) || 3);
@@ -33,28 +44,21 @@ export function buildSearchUrl(page = 1, query = config.searchQ) {
   return `https://www.dice.com/jobs?${params.toString()}`;
 }
 
-/**
- * Extract job id from a Dice job URL.
- * Supports /job-detail/{slug}/{id} and /jobs/detail/{id}
- */
 export function extractJobIdFromUrl(url) {
   const raw = String(url || "").trim();
   if (!raw) return null;
   try {
     const u = new URL(raw, "https://www.dice.com");
     const parts = u.pathname.split("/").filter(Boolean);
-    // /job-detail/title-slug/ABC123 or /jobs/detail/ABC123
     const detailIdx = parts.findIndex(
       (p) => p === "job-detail" || p === "detail"
     );
     if (detailIdx >= 0 && parts[detailIdx + 1]) {
-      // job-detail often has slug then id
       if (parts[detailIdx] === "job-detail" && parts[detailIdx + 2]) {
         return parts[detailIdx + 2];
       }
       return parts[detailIdx + 1];
     }
-    // query param fallback
     const qid = u.searchParams.get("jobId") || u.searchParams.get("id");
     return qid || null;
   } catch {
@@ -72,190 +76,131 @@ export function normalizeJobUrl(url) {
   }
 }
 
-/**
- * Collect job cards / links from a search results page.
- * @param {import('playwright').Page} page
- */
-export async function scrapeSearchPage(page) {
-  await page.waitForTimeout(1500);
+function queries() {
+  return config.searchQueries?.length
+    ? config.searchQueries
+    : [config.searchQ || "Data Engineer"];
+}
 
-  const jobs = await page.evaluate(() => {
-    const results = [];
-    const seen = new Set();
-
-    const root =
-      document.querySelector('[data-cy="search-page"]') ||
-      document.querySelector('main') ||
-      document.body;
-
-    // Prefer explicit search result cards when present
-    const cards = Array.from(
-      root.querySelectorAll(
-        '[data-cy="card"], [data-testid="job-search-serp-card"], article[data-cy], dhi-search-card, .card'
-      )
-    );
-
-    const collectFrom = (scope) => {
-      const anchors = Array.from(
-        scope.querySelectorAll(
-          'a[href*="/job-detail/"], a[href*="/jobs/detail/"], a[data-cy="card-title-link"]'
-        )
-      );
-      for (const a of anchors) {
-        const href = a.href || a.getAttribute("href") || "";
-        if (!href || seen.has(href)) continue;
-        if (!/job-detail|jobs\/detail/.test(href)) continue;
-        seen.add(href);
-
-        const card =
-          a.closest('[data-cy="card"]') ||
-          a.closest('[data-testid="job-search-serp-card"]') ||
-          a.closest("article") ||
-          a.closest("li") ||
-          a.parentElement;
-
-        const title =
-          (a.textContent || "").replace(/\s+/g, " ").trim() ||
-          a.getAttribute("aria-label") ||
-          "";
-
-        let company = "";
-        const companyEl =
-          card?.querySelector('[data-cy="search-result-company-name"]') ||
-          card?.querySelector('a[href*="/company-profile/"]') ||
-          card?.querySelector(".companyName, [class*='company']");
-        if (companyEl) {
-          company = (companyEl.textContent || "").replace(/\s+/g, " ").trim();
-        }
-
-        let location = "";
-        const locEl =
-          card?.querySelector('[data-cy="search-result-location"]') ||
-          card?.querySelector("[class*='location']");
-        if (locEl) {
-          location = (locEl.textContent || "").replace(/\s+/g, " ").trim();
-        }
-
-        results.push({ title, organization: company, location, url: href });
-      }
-    };
-
-    if (cards.length) {
-      for (const card of cards) collectFrom(card);
-    } else {
-      collectFrom(root);
+function workArrangement(row) {
+  const types = Array.isArray(row.workplaceTypes)
+    ? row.workplaceTypes.map((t) => String(t))
+    : [];
+  if (types.some((t) => /hybrid/i.test(t))) return "Hybrid";
+  if (types.some((t) => /on[-\s]?site|onsite/i.test(t)) && !row.isRemote) {
+    return "Onsite";
+  }
+  if (row.isRemote === true || types.some((t) => /remote/i.test(t))) {
+    // Pure remote only when no hybrid/onsite also listed.
+    if (types.some((t) => /hybrid|on[-\s]?site|onsite/i.test(t))) {
+      return types.join(", ");
     }
+    return "Remote";
+  }
+  return types.join(", ") || "";
+}
 
-    return results;
-  });
+function mapApiJob(row) {
+  const url = normalizeJobUrl(row.detailsPageUrl || "");
+  const id = extractJobIdFromUrl(url) || row.jobId || row.id;
+  if (!id) return null;
+  return {
+    id: String(id),
+    title: row.title || "",
+    organization: row.companyName || "",
+    location: row.jobLocation?.displayName || "",
+    work_arrangement: workArrangement(row),
+    remote_restricted_to: "",
+    experience_level: "",
+    employment_type: Array.isArray(row.employmentType)
+      ? row.employmentType.join(", ")
+      : row.employmentType || "",
+    salary_min: "",
+    salary_max: "",
+    salary_currency: "USD",
+    salary_unit: "",
+    key_skills: "",
+    source: "dice",
+    date_posted: isoDate(row.postedDate || row.modifiedDate),
+    url,
+    description: String(row.summary || "").slice(0, 20000),
+  };
+}
 
-  return jobs
-    .map((j) => ({
-      ...j,
-      url: normalizeJobUrl(j.url),
-      id: extractJobIdFromUrl(j.url),
-    }))
-    .filter((j) => j.id && j.url)
-    .slice(0, config.pageSize);
+function buildApiUrl(page, query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  params.set("countryCode2", "US");
+  params.set("radius", "30");
+  params.set("radiusUnit", "mi");
+  params.set("page", String(page));
+  params.set("pageSize", String(config.pageSize));
+  params.set("filters.postedDate", postedDateToken(config.recentDays));
+  params.set("filters.workplaceTypes", "Remote");
+  params.set("culture", "en");
+  params.set("language", "en");
+  params.set("includeRemote", "true");
+  params.set(
+    "facets",
+    "employmentType|postedDate|workFromHomeAvailability|employerType|easyApply|isRemote|workplaceTypes"
+  );
+  params.set(
+    "fields",
+    "id|jobId|summary|title|postedDate|modifiedDate|jobLocation.displayName|detailsPageUrl|salary|companyName|employmentType|workFromHomeAvailability|isRemote|workplaceTypes|companyPageUrl|employerType|easyApply"
+  );
+  return `${DICE_API}?${params.toString()}`;
 }
 
 /**
- * Paginate Dice search and return unique listing stubs.
- * @param {import('playwright').Browser} browser
+ * Fetch remote US data-engineering jobs from Dice's public search API.
  */
-export async function searchDiceJobs(browser) {
-  const contextOptions = {
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    viewport: { width: 1365, height: 900 },
-  };
-  if (fs.existsSync(config.diceAuthPath)) {
-    contextOptions.storageState = config.diceAuthPath;
-    console.log(`[search] using Dice auth: ${config.diceAuthPath}`);
-  }
-  const hasDiceAuth = fs.existsSync(config.diceAuthPath);
-  const context = await browser.newContext(contextOptions);
-  const page = await context.newPage();
-  const all = [];
-  const seenIds = new Set();
-  let appliedIds = new Set();
-  let appliedSkipped = 0;
-  let diceAuthExpired = false;
+export async function searchDiceJobs() {
+  console.log(`[dice] API discovery via job-search-api (curl)`);
 
-  try {
-    // With a saved session, read already-applied jobs so we can skip them.
-    if (hasDiceAuth) {
-      const applied = await collectDiceAppliedIds(page).catch(() => null);
-      if (applied) {
-        appliedIds = new Set(applied.ids);
-        diceAuthExpired = applied.loginRedirect === true;
-        if (diceAuthExpired) {
-          console.warn(
-            `[search] Dice session expired — applied jobs can't be excluded. Run: npm run dice:login`
-          );
-        } else {
-          console.log(`[search] already-applied Dice jobs to exclude: ${appliedIds.size}`);
-        }
+  const kept = [];
+  const seen = new Set();
+  const counts = emptySkipCounts();
+  let scanned = 0;
+
+  for (const query of queries()) {
+    console.log(`[dice] query="${query}"`);
+    for (let page = 1; page <= config.maxPages; page += 1) {
+      const url = buildApiUrl(page, query);
+      console.log(`[dice] page ${page}: api search`);
+      let json;
+      try {
+        json = await curlGetJson(url, {
+          timeoutMs: 45000,
+          headers: {
+            accept: "application/json, text/plain, */*",
+            origin: "https://www.dice.com",
+            referer: "https://www.dice.com/",
+            "x-api-key": DICE_API_KEY,
+          },
+        });
+      } catch (err) {
+        console.warn(`[dice] query "${query}" page ${page} failed: ${err.message}`);
+        break;
       }
-    }
+      const list = Array.isArray(json?.data) ? json.data : [];
+      console.log(`[dice] page ${page}: api jobs=${list.length}`);
+      if (!list.length) break;
 
-    const queries =
-      config.searchQueries?.length > 0
-        ? config.searchQueries
-        : [config.searchQ];
-
-    for (const query of queries) {
-      console.log(`[search] query="${query}"`);
-      for (let p = 1; p <= config.maxPages; p += 1) {
-        const url = buildSearchUrl(p, query);
-        console.log(`[search] page ${p}: ${url}`);
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-        // Wait for client-side results
-        try {
-          await page.waitForSelector(
-            'a[href*="/job-detail/"], a[href*="/jobs/detail/"]',
-            { timeout: 20000 }
-          );
-        } catch {
-          console.log(`[search] no job links on page ${p} for "${query}", next query`);
-          break;
-        }
-
-        const batch = await scrapeSearchPage(page);
-        console.log(`[search] page ${p}: found ${batch.length} links`);
-        if (!batch.length) break;
-
-        let newOnPage = 0;
-        for (const job of batch) {
-          if (seenIds.has(job.id)) continue;
-          seenIds.add(job.id);
-          if (appliedIds.has(job.id)) {
-            appliedSkipped += 1;
-            continue;
-          }
-          all.push(job);
+      let newOnPage = 0;
+      for (const row of list) {
+        const job = mapApiJob(row);
+        if (!job?.id || seen.has(job.id)) continue;
+        seen.add(job.id);
+        scanned += 1;
+        if (keepFeedJob(job, counts)) {
+          kept.push(job);
           newOnPage += 1;
         }
-        if (newOnPage === 0) break;
-
-        if (p < config.maxPages && config.delayMs) {
-          await page.waitForTimeout(config.delayMs);
-        }
       }
+      if (list.length < config.pageSize || newOnPage === 0) break;
     }
-  } finally {
-    await context.close();
   }
 
-  if (hasDiceAuth && !diceAuthExpired) {
-    console.log(
-      `[search] dice stubs=${all.length} (skipped already-applied=${appliedSkipped})`
-    );
-  }
-
-  return {
-    jobs: all,
-    appliedIds: Array.from(appliedIds),
-    unauthenticated: hasDiceAuth && diceAuthExpired,
-  };
+  logKept("dice", kept.length, scanned, counts);
+  return { jobs: kept };
 }
