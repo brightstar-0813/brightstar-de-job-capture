@@ -7,7 +7,6 @@
   "scripts": {
     "capture": "node src/capture.js",
     "start": "node src/server.js",
-    "jobright:login": "node src/jobright-login.js",
     "schedule:install": "powershell -ExecutionPolicy Bypass -File scripts/install-all-schedulers.ps1",
     "schedule:dice": "powershell -ExecutionPolicy Bypass -File scripts/install-scheduler.ps1",
     "schedule:api": "powershell -ExecutionPolicy Bypass -File scripts/install-api-autostart.ps1",

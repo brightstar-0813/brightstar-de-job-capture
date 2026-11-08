@@ -31,10 +31,7 @@ import {
   pruneStore,
   repairJobrightUrls,
 } from "./store.js";
-import {
-  notifyCaptureComplete,
-  notifyJobrightLoginExpired,
-} from "./slack.js";
+import { notifyCaptureComplete } from "./slack.js";
 
 let running = false;
 
@@ -142,7 +139,6 @@ export async function runCapture({ skipSlack = false } = {}) {
   const runId = beginRun();
   const counts = { newCount: 0, updatedCount: 0, skippedCount: 0 };
   const newJobs = [];
-  let jobrightAuthExpired = false;
   const enabled = enabledSources();
 
   console.log(
@@ -168,9 +164,6 @@ export async function runCapture({ skipSlack = false } = {}) {
     const feedBatches = await collectFeedJobs();
     for (const batch of feedBatches) {
       if (!batch) continue;
-      if (batch.name === "jobright") {
-        jobrightAuthExpired = !!batch.result?.auth?.unauthenticated;
-      }
       if (batch.jobs?.length) {
         ingestJobs(batch.jobs, runId, counts, newJobs);
       }
@@ -227,12 +220,6 @@ export async function runCapture({ skipSlack = false } = {}) {
           ...counts,
           newJobs,
         });
-        if (jobrightAuthExpired) {
-          await notifyJobrightLoginExpired({
-            webhookUrl: config.slackWebhookUrl,
-            runId,
-          });
-        }
       } catch (slackErr) {
         console.warn(`[slack] ${slackErr.message}`);
       }

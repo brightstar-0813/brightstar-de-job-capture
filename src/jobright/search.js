@@ -1,10 +1,9 @@
 /**
- * JobRight.ai data-engineering search — remote US roles via recommend/search API.
- * Discovery uses curl + SESSION_ID from jobright-auth.json (no Playwright).
+ * JobRight.ai data-engineering search — remote US roles from the public,
+ * logged-out search page (no login, no Playwright).
  * Does not filter by already-applied — CSV is shared across people.
  */
 
-import fs from "fs";
 import { config } from "../config.js";
 import {
   isDataEngTitle,
@@ -18,23 +17,9 @@ import {
   pickJobrightJobUrl,
   buildJobrightDescription,
 } from "./url.js";
-import {
-  fetchRecommendSearch,
-  hasJobrightSessionCookie,
-} from "./client.js";
+import { fetchPublicSearch } from "./client.js";
 
-export function buildJobrightSearchUrl(page = 1, query = config.searchQ) {
-  const taxonomy = encodeURIComponent(
-    JSON.stringify([{ taxonomyId: "00-00-00", title: query }])
-  );
-  const value = encodeURIComponent(query);
-  const start = Math.max(0, (page - 1) * config.pageSize);
-  return (
-    `https://jobright.ai/jobs/search?visit=search&value=${value}` +
-    `&searchType=job_title&country=US&jobTaxonomyList=${taxonomy}` +
-    `&startPos=${start}`
-  );
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function parseSalary(salaryDesc) {
   const s = String(salaryDesc || "");
@@ -103,17 +88,12 @@ function isTargetJob(mapped) {
 }
 
 /**
- * Fetch remote data-engineering jobs from JobRight API (curl + cookies).
+ * Fetch remote data-engineering jobs from JobRight's public search page.
+ * Each query yields at most 20 jobs (no logged-out pagination), so breadth
+ * comes from many distinct title seeds.
  */
 export async function searchJobrightJobs() {
-  console.log(`[jobright] API discovery via curl + saved session cookie`);
-
-  const hadAuthFile = fs.existsSync(config.jobrightAuthPath);
-  if (!hasJobrightSessionCookie()) {
-    console.warn(
-      `[jobright] no SESSION_ID — run: npm run jobright:login`
-    );
-  }
+  console.log(`[jobright] public search discovery (logged out)`);
 
   const all = [];
   const seen = new Set();
@@ -129,67 +109,59 @@ export async function searchJobrightJobs() {
     config.jobrightTitles && config.jobrightTitles.length
       ? config.jobrightTitles
       : [config.searchQ];
-  const pageSize = 20;
-  const pagesPerTitle = Math.max(1, config.jobrightMaxPages);
 
-  for (const query of titles) {
-    let titleOk = false;
-    for (let page = 0; page < pagesPerTitle; page += 1) {
-      const position = page * pageSize;
-      console.log(
-        `[jobright] API recommend/search query="${query}" page=${page + 1}/${pagesPerTitle} count=${pageSize} position=${position}`
-      );
-      const api = await fetchRecommendSearch({
-        count: pageSize,
-        query,
-        daysAgo: config.recentDays,
-        position,
-      });
-      const list = Array.isArray(api.jobList) ? api.jobList : [];
-      apiCount += list.length;
-      if (api.ok) titleOk = true;
-      console.log(
-        `[jobright] query="${query}" page=${page + 1} api jobs=${list.length} jobNum=${api.jobNum ?? "?"} ok=${api.ok}` +
-          (api.errorMsg ? ` err=${api.errorMsg}` : "")
-      );
-      if (!api.ok || !list.length) break;
+  for (const [i, query] of titles.entries()) {
+    if (i > 0 && config.delayMs) await sleep(config.delayMs);
+    let api;
+    try {
+      api = await fetchPublicSearch({ query, daysAgo: config.recentDays });
+    } catch (err) {
+      console.warn(`[jobright] query="${query}" failed: ${err.message}`);
+      continue;
+    }
+    const list = api.jobList;
+    apiCount += list.length;
+    if (api.ok) queryOkCount += 1;
+    let newForQuery = 0;
 
-      for (const item of list) {
-        const mapped = mapApiJob(item);
-        if (!mapped) continue;
-        if (seen.has(mapped.id)) continue;
-        seen.add(mapped.id);
+    for (const item of list) {
+      const mapped = mapApiJob(item);
+      if (!mapped) continue;
+      if (seen.has(mapped.id)) continue;
+      seen.add(mapped.id);
+      newForQuery += 1;
 
-        if (mapped._expired) {
-          expiredSkipped += 1;
-          continue;
-        }
-        if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
-          linkedinSkipped += 1;
-          continue;
-        }
-        if (!isRemoteArrangement(mapped.work_arrangement)) {
-          nonRemoteSkipped += 1;
-          continue;
-        }
-        if (!isTargetJob(mapped)) {
-          nonDeSkipped += 1;
-          continue;
-        }
-        if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
-          staleSkipped += 1;
-          continue;
-        }
-
-        delete mapped._applyLink;
-        delete mapped._linkedinApply;
-        delete mapped._expired;
-        all.push(mapped);
+      if (mapped._expired) {
+        expiredSkipped += 1;
+        continue;
+      }
+      if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
+        linkedinSkipped += 1;
+        continue;
+      }
+      if (!isRemoteArrangement(mapped.work_arrangement)) {
+        nonRemoteSkipped += 1;
+        continue;
+      }
+      if (!isTargetJob(mapped)) {
+        nonDeSkipped += 1;
+        continue;
+      }
+      if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
+        staleSkipped += 1;
+        continue;
       }
 
-      if (list.length < pageSize) break;
+      delete mapped._applyLink;
+      delete mapped._linkedinApply;
+      delete mapped._expired;
+      all.push(mapped);
     }
-    if (titleOk) queryOkCount += 1;
+
+    console.log(
+      `[jobright] query="${query}" jobs=${list.length} unseen=${newForQuery}` +
+        ` total=${api.totalJobs ?? "?"} status=${api.status} ok=${api.ok}`
+    );
   }
 
   console.log(
@@ -201,14 +173,5 @@ export async function searchJobrightJobs() {
       ` skipped stale(>${config.recentDays}d)=${staleSkipped})`
   );
 
-  return {
-    jobs: all,
-    auth: {
-      hadAuthFile,
-      attempts: titles.length,
-      okQueries: queryOkCount,
-      // Discovery needs SESSION_ID; surface expired login when all queries fail.
-      unauthenticated: queryOkCount === 0 && hadAuthFile,
-    },
-  };
+  return { jobs: all };
 }

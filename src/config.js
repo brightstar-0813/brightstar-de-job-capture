@@ -47,6 +47,20 @@ const DEFAULT_JOBRIGHT_TITLES = [
   "Data Platform Engineer",
   "Data Infrastructure Engineer",
   "Big Data Engineer",
+  "Data Warehouse Engineer",
+  "Data Pipeline Engineer",
+  "Cloud Data Engineer",
+  "Snowflake Data Engineer",
+  "Databricks Engineer",
+  "Spark Engineer",
+  "Azure Data Engineer",
+  "AWS Data Engineer",
+  "GCP Data Engineer",
+  "Data Integration Engineer",
+  "Junior Data Engineer",
+  "Python Data Engineer",
+  "Data Engineering Manager",
+  "Data Ops Engineer",
 ];
 
 export const config = {
@@ -224,17 +238,10 @@ export const config = {
     "cursor",
     "posthog",
   ]),
-  jobrightAuthPath: path.resolve(
-    root,
-    process.env.JOBRIGHT_AUTH_PATH || path.join("download", "jobright-auth.json")
-  ),
-  jobrightMaxPages: Math.max(
-    1,
-    Number(process.env.JOBRIGHT_MAX_PAGES || process.env.MAX_PAGES || 5)
-  ),
   /**
    * JobRight search SEEDS (not title filters). Keep/skip is the capture
-   * rule: US remote + Data Engineer-family title.
+   * rule: US remote + Data Engineer-family title. Logged-out search returns
+   * only the first 20 results per seed, so more seeds = more jobs.
    */
   jobrightTitles: parseCsvList(
     process.env.JOBRIGHT_TITLES,

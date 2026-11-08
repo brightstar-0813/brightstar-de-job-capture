@@ -150,22 +150,3 @@ export async function notifyCaptureComplete({
   await postSlackMessage(webhookUrl, body);
   return { ok: true };
 }
-
-/**
- * Alert that JobRight returned no authenticated results — its saved login is
- * missing or expired and needs to be refreshed with `npm run jobright:login`.
- * @param {{ webhookUrl: string, runId?: number }} opts
- */
-export async function notifyJobrightLoginExpired({ webhookUrl, runId }) {
-  if (!webhookUrl || !isSlackWebhookUrl(webhookUrl)) {
-    return { skipped: true, reason: "no_webhook" };
-  }
-  const runTag = runId != null ? ` (run #${runId})` : "";
-  const text =
-    `:warning: *JobRight login expired*${runTag}\n` +
-    `JobRight returned no authenticated results, so no JobRight jobs were captured this run. ` +
-    `Dice is unaffected.\n` +
-    `Fix: run \`npm run jobright:login\` to refresh the saved session.`;
-  await postSlackMessage(webhookUrl, text);
-  return { ok: true };
-}

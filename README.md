@@ -25,20 +25,12 @@ Filter (applied to all sources):
 | **Himalayas / Remotive / Remote OK / WWR** | Public API / RSS | curl-friendly; parallel; no browser |
 | **Greenhouse / Lever / Ashby** | Public board APIs | Curated company tokens; concurrent (`mapPool`) |
 | **Dice** | Public job-search API | curl + web client key; no browser for discovery |
-| **JobRight** | HTTP API | curl + `SESSION_ID` from `jobright:login` |
+| **JobRight** | Public search page | curl + `__NEXT_DATA__` (logged out; ~20 jobs/seed) |
 | **ZipRecruiter / Monster** | Playwright | **Off by default** (often blocked) |
-
-### JobRight session (required for JobRight source)
-
-```bash
-npm run jobright:login
-```
-
-JobRight’s search API needs a `SESSION_ID` cookie from that login file. When it expires you get a Slack alert and JobRight returns 0 until you re-login.
 
 ### Chrome extension (optional)
 
-The extension can still scrape JobRight from your Chrome session and `POST /api/ingest`. Scheduler capture no longer depends on it.
+The extension can still scrape JobRight from a logged-in Chrome tab and `POST /api/ingest`. Scheduled capture uses the public page and does not need a JobRight login.
 
 ## Fully automatic — daily at 5 AM and 5 PM (Windows)
 

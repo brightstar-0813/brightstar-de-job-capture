@@ -34,6 +34,7 @@ function tmpPath(prefix) {
  *   timeoutMs?: number,
  *   userAgent?: string,
  *   cookies?: string,
+ *   followRedirects?: boolean,
  * }} [opts]
  * @returns {Promise<{ status: number, body: string }>}
  */
@@ -51,6 +52,9 @@ export async function curlRequest(url, opts = {}) {
     "-w",
     "%{http_code}",
   ];
+  if (opts.followRedirects) {
+    args.push("-L", "--max-redirs", "5");
+  }
 
   const headers = { ...(opts.headers || {}) };
   // Pass cookies as a header string. Do NOT use `-b <file>` unless the file
