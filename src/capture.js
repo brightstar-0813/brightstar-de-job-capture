@@ -1,8 +1,8 @@
 /**
  * Capture US-remote data engineering jobs — public APIs/feeds first
  * (Greenhouse, Lever, Ashby, Himalayas, Remotive, Remote OK, WWR),
- * plus Dice, Built In, and JobRight over HTTP/curl (no browser required
- * for discovery). ZipRecruiter/Monster stay off by default.
+ * plus Dice and Built In over HTTP/curl. JobRight uses Playwright
+ * (Cloudflare clearance cookies). ZipRecruiter/Monster stay off by default.
  */
 
 import { chromium } from "playwright";
@@ -119,7 +119,6 @@ async function collectFeedJobs() {
   if (config.captureWwr) curlRunners.push(["wwr", searchWwrJobs]);
   if (config.captureBuiltin) curlRunners.push(["builtin", searchBuiltinJobs]);
   if (config.captureDice) curlRunners.push(["dice", searchDiceJobs]);
-  if (config.captureJobright) curlRunners.push(["jobright", searchJobrightJobs]);
 
   const fetchBatches = await runPool(fetchRunners, 6);
   const curlBatches = await runPool(curlRunners, 2);
@@ -127,8 +126,12 @@ async function collectFeedJobs() {
 }
 
 function needsBrowser() {
-  // Discovery is HTTP/curl. Playwright only for optional ZipRecruiter/Monster.
-  return config.captureZiprecruiter || config.captureMonster;
+  // JobRight needs Playwright for Cloudflare; ZR/Monster optional.
+  return (
+    config.captureJobright ||
+    config.captureZiprecruiter ||
+    config.captureMonster
+  );
 }
 
 export async function runCapture({ skipSlack = false } = {}) {
@@ -160,13 +163,21 @@ export async function runCapture({ skipSlack = false } = {}) {
       console.log(`[capture] API/curl mode — no Playwright browser`);
     }
 
-    // Parallel public HTTP sources (includes Built In / Dice / JobRight).
+    // Parallel public HTTP sources (Built In / Dice / ATS / feeds).
     const feedBatches = await collectFeedJobs();
     for (const batch of feedBatches) {
       if (!batch) continue;
       if (batch.jobs?.length) {
         ingestJobs(batch.jobs, runId, counts, newJobs);
       }
+    }
+
+    if (browser && config.captureJobright) {
+      await runNamedSource("jobright", async () => {
+        const { jobs } = await searchJobrightJobs(browser);
+        console.log(`[capture] jobright jobs: ${jobs.length}`);
+        ingestJobs(jobs, runId, counts, newJobs);
+      });
     }
 
     // Optional browser-only boards (off by default).

@@ -239,9 +239,17 @@ export const config = {
     "posthog",
   ]),
   /**
+   * Playwright storageState for JobRight Cloudflare clearance cookies.
+   * Written after a headed challenge clear; reused headlessly until expired.
+   */
+  jobrightAuthPath: path.resolve(
+    root,
+    process.env.JOBRIGHT_AUTH_PATH || path.join("download", "jobright-auth.json")
+  ),
+  /**
    * JobRight search SEEDS (not title filters). Keep/skip is the capture
-   * rule: US remote + Data Engineer-family title. Logged-out search returns
-   * only the first 20 results per seed, so more seeds = more jobs.
+   * rule: US remote + Data Engineer-family title. Search returns ~20 jobs
+   * per seed when logged out, so more seeds = more jobs.
    */
   jobrightTitles: parseCsvList(
     process.env.JOBRIGHT_TITLES,

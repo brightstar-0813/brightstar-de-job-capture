@@ -1,7 +1,7 @@
 /**
- * JobRight.ai data-engineering search — remote US roles from the public,
- * logged-out search page (no login, no Playwright).
- * Does not filter by already-applied — CSV is shared across people.
+ * JobRight.ai data-engineering search — remote US roles via Playwright.
+ * Uses saved Cloudflare clearance cookies; opens a headed window once when
+ * challenged. Does not filter by already-applied — CSV is shared across people.
  */
 
 import { config } from "../config.js";
@@ -17,7 +17,12 @@ import {
   pickJobrightJobUrl,
   buildJobrightDescription,
 } from "./url.js";
-import { fetchPublicSearch } from "./client.js";
+import {
+  openJobrightContext,
+  fetchSearchInPage,
+  refreshClearanceHeaded,
+  persistStorageState,
+} from "./client.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -88,12 +93,19 @@ function isTargetJob(mapped) {
 }
 
 /**
- * Fetch remote data-engineering jobs from JobRight's public search page.
- * Each query yields at most 20 jobs (no logged-out pagination), so breadth
- * comes from many distinct title seeds.
+ * @param {import('playwright').Browser} browser
  */
-export async function searchJobrightJobs() {
-  console.log(`[jobright] public search discovery (logged out)`);
+export async function searchJobrightJobs(browser) {
+  console.log(`[jobright] Playwright discovery (clearance cookies)`);
+
+  const titles =
+    config.jobrightTitles && config.jobrightTitles.length
+      ? config.jobrightTitles
+      : [config.searchQ];
+
+  let context = await openJobrightContext(browser);
+  let page = await context.newPage();
+  let refreshed = false;
 
   const all = [];
   const seen = new Set();
@@ -105,63 +117,105 @@ export async function searchJobrightJobs() {
   let apiCount = 0;
   let queryOkCount = 0;
 
-  const titles =
-    config.jobrightTitles && config.jobrightTitles.length
-      ? config.jobrightTitles
-      : [config.searchQ];
+  try {
+    for (const [i, query] of titles.entries()) {
+      if (i > 0 && config.delayMs) await sleep(config.delayMs);
 
-  for (const [i, query] of titles.entries()) {
-    if (i > 0 && config.delayMs) await sleep(config.delayMs);
-    let api;
-    try {
-      api = await fetchPublicSearch({ query, daysAgo: config.recentDays });
-    } catch (err) {
-      console.warn(`[jobright] query="${query}" failed: ${err.message}`);
-      continue;
+      let api;
+      try {
+        api = await fetchSearchInPage(page, {
+          query,
+          daysAgo: config.recentDays,
+        });
+      } catch (err) {
+        console.warn(`[jobright] query="${query}" failed: ${err.message}`);
+        continue;
+      }
+
+      if (api.challenged && !refreshed) {
+        refreshed = true;
+        console.warn(`[jobright] blocked on query="${query}" — refreshing clearance`);
+        await context.close().catch(() => {});
+        const ok = await refreshClearanceHeaded(query);
+        if (!ok) {
+          console.warn(`[jobright] could not clear challenge — skipping remaining seeds`);
+          break;
+        }
+        context = await openJobrightContext(browser);
+        page = await context.newPage();
+        try {
+          api = await fetchSearchInPage(page, {
+            query,
+            daysAgo: config.recentDays,
+          });
+        } catch (err) {
+          console.warn(`[jobright] retry query="${query}" failed: ${err.message}`);
+          continue;
+        }
+        if (api.challenged) {
+          console.warn(
+            `[jobright] still challenged after headed refresh — skipping JobRight`
+          );
+          break;
+        }
+      } else if (api.challenged && refreshed) {
+        console.warn(
+          `[jobright] challenged again after refresh — stopping JobRight early`
+        );
+        break;
+      }
+
+      const list = api.jobList;
+      apiCount += list.length;
+      if (api.ok) queryOkCount += 1;
+      let newForQuery = 0;
+
+      for (const item of list) {
+        const mapped = mapApiJob(item);
+        if (!mapped) continue;
+        if (seen.has(mapped.id)) continue;
+        seen.add(mapped.id);
+        newForQuery += 1;
+
+        if (mapped._expired) {
+          expiredSkipped += 1;
+          continue;
+        }
+        if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
+          linkedinSkipped += 1;
+          continue;
+        }
+        if (!isRemoteArrangement(mapped.work_arrangement)) {
+          nonRemoteSkipped += 1;
+          continue;
+        }
+        if (!isTargetJob(mapped)) {
+          nonDeSkipped += 1;
+          continue;
+        }
+        if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
+          staleSkipped += 1;
+          continue;
+        }
+
+        delete mapped._applyLink;
+        delete mapped._linkedinApply;
+        delete mapped._expired;
+        all.push(mapped);
+      }
+
+      console.log(
+        `[jobright] query="${query}" jobs=${list.length} unseen=${newForQuery}` +
+          ` total=${api.totalJobs ?? "?"} ok=${api.ok} via=${api.via || "?"}`
+      );
     }
-    const list = api.jobList;
-    apiCount += list.length;
-    if (api.ok) queryOkCount += 1;
-    let newForQuery = 0;
 
-    for (const item of list) {
-      const mapped = mapApiJob(item);
-      if (!mapped) continue;
-      if (seen.has(mapped.id)) continue;
-      seen.add(mapped.id);
-      newForQuery += 1;
-
-      if (mapped._expired) {
-        expiredSkipped += 1;
-        continue;
-      }
-      if (mapped._linkedinApply || /linkedin\.com/i.test(mapped.url || "")) {
-        linkedinSkipped += 1;
-        continue;
-      }
-      if (!isRemoteArrangement(mapped.work_arrangement)) {
-        nonRemoteSkipped += 1;
-        continue;
-      }
-      if (!isTargetJob(mapped)) {
-        nonDeSkipped += 1;
-        continue;
-      }
-      if (isWithinRecentDays(mapped.date_posted, config.recentDays) === false) {
-        staleSkipped += 1;
-        continue;
-      }
-
-      delete mapped._applyLink;
-      delete mapped._linkedinApply;
-      delete mapped._expired;
-      all.push(mapped);
+    // Refresh saved state after a successful scrape so cookies stay current.
+    if (queryOkCount > 0) {
+      await persistStorageState(context).catch(() => {});
     }
-
-    console.log(
-      `[jobright] query="${query}" jobs=${list.length} unseen=${newForQuery}` +
-        ` total=${api.totalJobs ?? "?"} status=${api.status} ok=${api.ok}`
-    );
+  } finally {
+    await context.close().catch(() => {});
   }
 
   console.log(

@@ -25,12 +25,16 @@ Filter (applied to all sources):
 | **Himalayas / Remotive / Remote OK / WWR** | Public API / RSS | curl-friendly; parallel; no browser |
 | **Greenhouse / Lever / Ashby** | Public board APIs | Curated company tokens; concurrent (`mapPool`) |
 | **Dice** | Public job-search API | curl + web client key; no browser for discovery |
-| **JobRight** | Public search page | curl + `__NEXT_DATA__` (logged out; ~20 jobs/seed) |
+| **JobRight** | Playwright | Public search + saved Cloudflare clearance cookies (~20 jobs/seed) |
 | **ZipRecruiter / Monster** | Playwright | **Off by default** (often blocked) |
+
+### JobRight Cloudflare clearance
+
+Scheduled capture uses Playwright (no JobRight account). Cookies are saved to `download/jobright-auth.json`. If Turnstile blocks a run, a **headed** browser window opens once so the challenge can clear; later runs reuse the saved state headlessly until it expires.
 
 ### Chrome extension (optional)
 
-The extension can still scrape JobRight from a logged-in Chrome tab and `POST /api/ingest`. Scheduled capture uses the public page and does not need a JobRight login.
+The extension can still scrape JobRight from a logged-in Chrome tab and `POST /api/ingest`.
 
 ## Fully automatic — daily at 5 AM and 5 PM (Windows)
 
