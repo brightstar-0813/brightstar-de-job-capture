@@ -8,10 +8,8 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $taskName = "DEJobCapture_API_AtLogon"
-$legacyTaskNames = @(
-  "AIJobCapture_API_AtLogon",
-  "DiceJobCapture_API_AtLogon"
-)
+# Only remove older names for THIS bot — never AI/SF API tasks (other repos).
+$legacyTaskNames = @()
 
 $nodeCandidates = @(
   "$env:LOCALAPPDATA\nvm\v20.12.2\node.exe",

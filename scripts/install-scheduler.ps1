@@ -6,13 +6,10 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $taskName = "DEJobCapture_5am5pm"
+# Only remove older names for THIS bot — never AIJobCapture_* / DiceJobCapture_* (other repos).
 $legacyTaskNames = @(
-  "AIJobCapture_5am5pm",
-  "AIJobCapture_Every8Hours",
-  "AIJobCapture_Every12Hours",
-  "DiceJobCapture_5am5pm",
-  "DiceJobCapture_Every8Hours",
-  "DiceJobCapture_Every12Hours"
+  "DEJobCapture_Every8Hours",
+  "DEJobCapture_Every12Hours"
 )
 
 $nodeCandidates = @(
