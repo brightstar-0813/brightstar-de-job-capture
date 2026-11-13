@@ -1,8 +1,14 @@
 import fs from "fs";
 import path from "path";
-import { config, CSV_HEADERS, SOURCE_IDS, SOURCE_PRIORITY, CSV_SOURCE_ORDER } from "./config.js";
+import {
+  config,
+  CSV_HEADERS,
+  SOURCE_IDS,
+  SOURCE_PRIORITY,
+  CSV_EXPORT_ORDER,
+} from "./config.js";
 import { writeCsv } from "./csv.js";
-import { matchesCaptureRule, isRecentJob } from "./filter.js";
+import { matchesCaptureRule, isRecentJob, parsePostedDate } from "./filter.js";
 import {
   isIncompleteExternalJobUrl,
   repairJobrightStoredUrl,
@@ -62,15 +68,70 @@ function sourceHintFromUrl(url) {
   if (/boards\.greenhouse\.io|greenhouse\.io/.test(u)) return "greenhouse";
   if (/jobs\.lever\.co/.test(u)) return "lever";
   if (/jobs\.ashbyhq\.com|ashbyhq\.com/.test(u)) return "ashby";
+  if (/myworkdayjobs\.com|workday\.com\/.*\/job\//.test(u)) return "workday";
+  if (/indeed\.com/.test(u)) return "indeed";
   if (/dice\.com/.test(u)) return "dice";
   if (/ziprecruiter\.com/.test(u)) return "ziprecruiter";
   if (/builtin\.com/.test(u)) return "builtin";
   if (/monster\.com/.test(u)) return "monster";
+  if (/careerbuilder\.com/.test(u)) return "careerbuilder";
   if (/himalayas\.app/.test(u)) return "himalayas";
   if (/remotive\.com/.test(u)) return "remotive";
   if (/remoteok\.com/.test(u)) return "remoteok";
   if (/weworkremotely\.com/.test(u)) return "wwr";
   return "";
+}
+
+function isWorkdayJobUrl(url) {
+  return sourceHintFromUrl(url) === "workday";
+}
+
+function csvSourceSlug(source) {
+  return (
+    String(source || "other")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "other"
+  );
+}
+
+export function csvExportIndex(source) {
+  const slug = csvSourceSlug(source);
+  const idx = CSV_EXPORT_ORDER.indexOf(slug);
+  return idx === -1 ? CSV_EXPORT_ORDER.length + 1 : idx + 1;
+}
+
+export function csvPathForSource(source) {
+  const slug = csvSourceSlug(source);
+  const n = String(csvExportIndex(slug)).padStart(2, "0");
+  return path.join(config.dataDir, `${n}_${slug}_jobs_latest.csv`);
+}
+
+function cleanupLegacySourceCsvs(keepPaths) {
+  const keep = new Set(
+    [...keepPaths, config.csvLatestPath].map((p) => path.resolve(String(p || "")))
+  );
+  let dir;
+  try {
+    dir = fs.readdirSync(config.dataDir);
+  } catch {
+    return;
+  }
+  for (const name of dir) {
+    if (!/_jobs_latest\.csv$/i.test(name)) continue;
+    if (/^\d{2}_/.test(name)) continue;
+    const full = path.resolve(config.dataDir, name);
+    if (keep.has(full)) continue;
+    try {
+      fs.unlinkSync(full);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function withSeq(rows) {
+  return (rows || []).map((row, i) => ({ ...row, seq: i + 1 }));
 }
 
 export function sourcePriorityRank(job) {
@@ -459,32 +520,114 @@ export function repairJobrightUrls() {
   return { repaired };
 }
 
-function csvSourceRank(source) {
-  const src = String(source || "").toLowerCase();
-  const idx = CSV_SOURCE_ORDER.indexOf(src);
-  return idx === -1 ? CSV_SOURCE_ORDER.length : idx;
+function csvSourceRank(job) {
+  return sourcePriorityRank(job);
+}
+
+function jobPostedAtMs(job, now = new Date()) {
+  const posted = parsePostedDate(job?.date_posted, now);
+  return posted ? posted.getTime() : 0;
+}
+
+function sortJobsForCsv(jobs, now = new Date()) {
+  const list = [...(jobs || [])];
+  list.sort((a, b) => {
+    const aMs = jobPostedAtMs(a, now);
+    const bMs = jobPostedAtMs(b, now);
+    const aDated = aMs > 0;
+    const bDated = bMs > 0;
+    if (aDated !== bDated) return aDated ? -1 : 1;
+    if (bMs !== aMs) return bMs - aMs;
+
+    const bySource = csvSourceRank(a) - csvSourceRank(b);
+    if (bySource !== 0) return bySource;
+
+    const aSeen = Date.parse(a?.last_seen_at || a?.first_seen_at || "") || 0;
+    const bSeen = Date.parse(b?.last_seen_at || b?.first_seen_at || "") || 0;
+    if (bSeen !== aSeen) return bSeen - aSeen;
+
+    return String(b.last_seen_at || "").localeCompare(
+      String(a.last_seen_at || "")
+    );
+  });
+  return list;
 }
 
 /**
- * Write one combined CSV with the latest qualifying jobs from all sources.
- * @returns {{ csvPath: string, latestPath: string, count: number }}
+ * Write combined + per-source CSVs with the latest qualifying jobs.
+ * - `jobs_latest.csv` — all sources (rows numbered via `seq`)
+ * - `NN_{source}_jobs_latest.csv` — one numbered file per source
+ * - `NN_workday_jobs_latest.csv` — Workday apply URLs (any source)
  */
 export function syncCsv(rows = null) {
   const all = rows || allJobs();
-  const clean = (all || []).filter((j) => matchesOutputRule(j));
-  clean.sort((a, b) => {
-    const bySource = csvSourceRank(a.source) - csvSourceRank(b.source);
-    if (bySource !== 0) return bySource;
-    return String(b.last_seen_at || b.date_posted || "").localeCompare(
-      String(a.last_seen_at || a.date_posted || "")
-    );
-  });
+  const now = new Date();
+  const clean = sortJobsForCsv(
+    (all || [])
+      .filter((j) => matchesOutputRule(j))
+      .map((j) => {
+        if (String(j.source || "").toLowerCase() === "jobright" || /^jobright_/i.test(j.id || "")) {
+          return { ...j, source: "jobright" };
+        }
+        const idSrc = sourceFromId(j.id);
+        return idSrc && idSrc !== j.source ? { ...j, source: idSrc } : j;
+      }),
+    now
+  );
 
   const latestPath = config.csvLatestPath;
-  writeCsv(latestPath, clean);
+  writeCsv(latestPath, withSeq(clean));
+
+  const bySource = {};
+  const buckets = new Map();
+  for (const job of clean) {
+    const src = csvSourceSlug(job.source || sourceFromId(job.id) || "other");
+    if (!buckets.has(src)) buckets.set(src, []);
+    buckets.get(src).push(job);
+  }
+
+  const writtenPaths = [];
+  const sourcesToWrite = [
+    ...CSV_EXPORT_ORDER,
+    ...[...buckets.keys()].filter((s) => !CSV_EXPORT_ORDER.includes(s)),
+  ];
+  for (const src of sourcesToWrite) {
+    if (src === "workday") continue;
+    const list = sortJobsForCsv(buckets.get(src) || [], now);
+    const filePath = csvPathForSource(src);
+    writeCsv(filePath, withSeq(list));
+    writtenPaths.push(filePath);
+    bySource[src] = {
+      path: filePath,
+      count: list.length,
+      seq: csvExportIndex(src),
+    };
+  }
+
+  const workdayJobs = sortJobsForCsv(
+    clean.filter((j) => isWorkdayJobUrl(j.url)),
+    now
+  );
+  const workdayPath = csvPathForSource("workday");
+  writeCsv(workdayPath, withSeq(workdayJobs));
+  writtenPaths.push(workdayPath);
+  bySource.workday = {
+    path: workdayPath,
+    count: workdayJobs.length,
+    seq: csvExportIndex("workday"),
+  };
+
+  cleanupLegacySourceCsvs(writtenPaths);
+
   setMeta("last_csv_path", latestPath);
   setMeta("last_csv_latest_path", latestPath);
-  return { csvPath: latestPath, latestPath, count: clean.length };
+  setMeta("last_csv_by_source", JSON.stringify(bySource));
+  return {
+    csvPath: latestPath,
+    latestPath,
+    count: clean.length,
+    bySource,
+  };
 }
 
 export function closeStore() {

@@ -7,8 +7,9 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$taskName = "AIJobCapture_API_AtLogon"
+$taskName = "DEJobCapture_API_AtLogon"
 $legacyTaskNames = @(
+  "AIJobCapture_API_AtLogon",
   "DiceJobCapture_API_AtLogon"
 )
 

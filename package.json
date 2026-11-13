@@ -1,12 +1,14 @@
 {
   "name": "de-jobs-capture",
   "version": "1.1.0",
-  "description": "Capture US-remote data engineering jobs from ATS feeds, Dice, Built In, and JobRight — CSV + Slack + Chrome extension UI",
+  "description": "Capture US-remote data engineering jobs from multi-source ATS/feeds, Dice, Built In, JobRight /swan, and optional Playwright boards — CSV + Slack",
   "type": "module",
   "main": "src/capture.js",
   "scripts": {
     "capture": "node src/capture.js",
     "start": "node src/server.js",
+    "indeed:login": "node src/indeed-login.js",
+    "jobright:login": "node src/jobright-login.js",
     "schedule:install": "powershell -ExecutionPolicy Bypass -File scripts/install-all-schedulers.ps1",
     "schedule:dice": "powershell -ExecutionPolicy Bypass -File scripts/install-scheduler.ps1",
     "schedule:api": "powershell -ExecutionPolicy Bypass -File scripts/install-api-autostart.ps1",

@@ -12,6 +12,6 @@ $here = $PSScriptRoot
 
 Write-Host ""
 Write-Host "All set:"
-Write-Host "  - AIJobCapture_5am5pm       (capture daily at 5 AM and 5 PM)"
-Write-Host "  - AIJobCapture_API_AtLogon   (npm start equivalent at login)"
+Write-Host "  - DEJobCapture_5am5pm       (capture daily at 5 AM and 5 PM)"
+Write-Host "  - DEJobCapture_API_AtLogon   (npm start equivalent at login)"
 Write-Host "Keep Chrome signed in to JobRight; extension runs at 5 AM and 5 PM while Chrome is open."

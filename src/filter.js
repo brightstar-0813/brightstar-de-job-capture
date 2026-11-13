@@ -64,6 +64,31 @@ export function containsAi(title, description) {
   return isDataEngTitle(title, description);
 }
 
+/** Alias used by Indeed / CareerBuilder / JobRight adapters. */
+export function containsDataEng(title, description) {
+  return isDataEngTitle(title, description);
+}
+
+/** DE bot does not block named employers (SF bot blocks Salesforce Inc / ICF). */
+export function isBlockedEmployer(_organization) {
+  return false;
+}
+
+/**
+ * US-friendly location check for Playwright scrapers.
+ * Delegates to isUsEligible with a lightweight job-shaped object.
+ */
+export function isUsFriendlyLocation(location, title = "") {
+  return isUsEligible({ location, title });
+}
+
+/** True when a listing page says the job is closed, filled, or gone. */
+export function isExpiredPosting(text) {
+  return /this job is no longer available|no longer accepting applications|this (job|position|posting) (has expired|is expired|has been filled|is closed)|job (posting )?(has )?expired|position has been filled|no longer posted|this posting is no longer/i.test(
+    String(text || "")
+  );
+}
+
 /**
  * Remote-only: keep fully remote roles, drop hybrid and on-site.
  * An empty value is treated as remote only because Dice search is already

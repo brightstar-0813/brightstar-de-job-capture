@@ -31,9 +31,12 @@ function csvList(name, fallback) {
 const DEFAULT_SEARCH_QUERIES = [
   "Data Engineer",
   "Senior Data Engineer",
+  "Staff Data Engineer",
   "Analytics Engineer",
   "ETL Engineer",
   "Data Platform Engineer",
+  "Databricks Engineer",
+  "Snowflake Data Engineer",
 ];
 
 const DEFAULT_JOBRIGHT_TITLES = [
@@ -101,12 +104,33 @@ export const config = {
   captureAshby: bool("CAPTURE_ASHBY", true),
   captureHimalayas: bool("CAPTURE_HIMALAYAS", true),
   captureRemotive: bool("CAPTURE_REMOTIVE", true),
+  captureJobicy: bool("CAPTURE_JOBICY", true),
   captureRemoteok: bool("CAPTURE_REMOTEOK", true),
   captureWwr: bool("CAPTURE_WWR", true),
-  /** Often Cloudflare-blocked in headless — off by default (prefer public APIs). */
-  captureZiprecruiter: bool("CAPTURE_ZIPRECRUITER", false),
-  /** Often empty/blocked in headless — off by default (prefer public APIs). */
-  captureMonster: bool("CAPTURE_MONSTER", false),
+  captureJobgether: bool("CAPTURE_JOBGETHER", true),
+  captureArbeitnow: bool("CAPTURE_ARBEITNOW", true),
+  captureThemuse: bool("CAPTURE_THEMUSE", true),
+  captureWorkingnomads: bool("CAPTURE_WORKINGNOMADS", true),
+  captureJobspresso: bool("CAPTURE_JOBSPRESSO", true),
+  captureSkipthedrive: bool("CAPTURE_SKIPTHEDRIVE", true),
+  captureArc: bool("CAPTURE_ARC", true),
+  captureUsajobs: bool("CAPTURE_USAJOBS", true),
+  captureAdzuna: bool("CAPTURE_ADZUNA", true),
+  captureGooglejobs: bool("CAPTURE_GOOGLEJOBS", true),
+  /** Playwright ZipRecruiter — on by default; may no-op if Cloudflare blocks. */
+  captureZiprecruiter: bool("CAPTURE_ZIPRECRUITER", true),
+  /** Playwright Monster — on by default; fail soft when blocked. */
+  captureMonster: bool("CAPTURE_MONSTER", true),
+  /** Indeed scrape — off by default (Cloudflare); set CAPTURE_INDEED=true. */
+  captureIndeed: bool("CAPTURE_INDEED", false),
+  /** CareerBuilder — off by default (often bot-blocked). */
+  captureCareerbuilder: bool("CAPTURE_CAREERBUILDER", false),
+  usajobsApiKey: String(process.env.USAJOBS_API_KEY || "").trim(),
+  usajobsUserEmail: String(process.env.USAJOBS_USER_EMAIL || "").trim(),
+  adzunaAppId: String(process.env.ADZUNA_APP_ID || "").trim(),
+  adzunaAppKey: String(process.env.ADZUNA_APP_KEY || "").trim(),
+  serpapiKey: String(process.env.SERPAPI_KEY || "").trim(),
+  jobicyTags: csvList("JOBICY_TAGS", ["python", "data", "etl", "sql"]),
   /**
    * Greenhouse board tokens (boards.greenhouse.io/{token}).
    * Data-platform / analytics-leaning employers.
@@ -168,6 +192,30 @@ export const config = {
     "shippo",
     "faire",
     "whatnot",
+    "amplitude",
+    "mixpanel",
+    "sentry",
+    "launchdarkly",
+    "fullstory",
+    "spotify",
+    "adobe",
+    "intuit",
+    "paypal",
+    "sofi",
+    "chime",
+    "slack",
+    "heroku",
+    "crowdstrike",
+    "samsara",
+    "gong",
+    "clari",
+    "outreach",
+    "braze",
+    "iterable",
+    "klaviyo",
+    "informatica",
+    "snaplogic",
+    "workato",
   ]),
   /**
    * Lever company tokens (jobs.lever.co/{token}).
@@ -237,40 +285,72 @@ export const config = {
     "retool",
     "cursor",
     "posthog",
+    "dbtlabs",
+    "fivetran",
+    "airbyte",
+    "prefect",
+    "astronomer",
   ]),
+  indeedAuthPath: path.resolve(
+    root,
+    process.env.INDEED_AUTH_PATH || path.join("download", "indeed-auth.json")
+  ),
+  indeedHeaded: bool("INDEED_HEADED", false),
   /**
-   * Playwright storageState for JobRight Cloudflare clearance cookies.
-   * Written after a headed challenge clear; reused headlessly until expired.
+   * Playwright storageState cookies for JobRight /swan (Cloudflare clearance).
    */
   jobrightAuthPath: path.resolve(
     root,
     process.env.JOBRIGHT_AUTH_PATH || path.join("download", "jobright-auth.json")
   ),
   /**
-   * JobRight search SEEDS (not title filters). Keep/skip is the capture
-   * rule: US remote + Data Engineer-family title. Search returns ~20 jobs
-   * per seed when logged out, so more seeds = more jobs.
+   * Role-title fan-out for Jobspresso (and optional Built In). Tune via ROLE_TITLES.
    */
-  jobrightTitles: parseCsvList(
-    process.env.JOBRIGHT_TITLES,
-    DEFAULT_JOBRIGHT_TITLES
+  roleTitles: csvList("ROLE_TITLES", DEFAULT_JOBRIGHT_TITLES),
+  rolePages: Math.max(1, Number(process.env.ROLE_PAGES || 2)),
+  jobrightMaxPages: Math.max(
+    1,
+    Number(process.env.JOBRIGHT_MAX_PAGES || process.env.MAX_PAGES || 5)
   ),
+  /**
+   * JobRight search SEEDS (not title filters). Keep/skip is the capture
+   * rule: US remote + Data Engineer-family title. /swan returns 20 jobs per
+   * page; JOBRIGHT_MAX_PAGES (default 5) pages each seed.
+   */
+  jobrightTitles: csvList("JOBRIGHT_TITLES", DEFAULT_JOBRIGHT_TITLES),
 };
+
+export function pagesForSearchQuery(index) {
+  return Number(index) === 0 ? config.maxPages : config.searchExtraPages;
+}
 
 /** Known capture source ids (used for status counts). */
 export const SOURCE_IDS = [
-  "dice",
-  "jobright",
   "builtin",
+  "himalayas",
   "greenhouse",
+  "dice",
   "lever",
   "ashby",
-  "himalayas",
   "remotive",
+  "jobicy",
   "remoteok",
   "wwr",
+  "jobgether",
+  "arbeitnow",
+  "themuse",
+  "workingnomads",
+  "jobspresso",
+  "skipthedrive",
+  "arc",
+  "usajobs",
+  "adzuna",
+  "googlejobs",
   "ziprecruiter",
   "monster",
+  "indeed",
+  "careerbuilder",
+  "jobright",
 ];
 
 /**
@@ -284,18 +364,65 @@ export const SOURCE_PRIORITY = [
   "dice",
   "lever",
   "ashby",
+  "indeed",
+  "ziprecruiter",
+  "careerbuilder",
+  "monster",
+  "jobgether",
+  "themuse",
   "remotive",
+  "jobicy",
   "remoteok",
   "wwr",
-  "ziprecruiter",
-  "monster",
+  "workingnomads",
+  "jobspresso",
+  "skipthedrive",
+  "arc",
+  "arbeitnow",
+  "usajobs",
+  "adzuna",
+  "googlejobs",
   "jobright",
 ];
 
 /** CSV row order — mirrors SOURCE_PRIORITY (JobRight last). */
 export const CSV_SOURCE_ORDER = [...SOURCE_PRIORITY];
 
+/**
+ * Filename sequence for per-source CSVs (`01_builtin_…`, `02_himalayas_…`).
+ * Workday is a URL-board view (not a capture source).
+ */
+export const CSV_EXPORT_ORDER = [
+  "builtin",
+  "himalayas",
+  "greenhouse",
+  "dice",
+  "lever",
+  "ashby",
+  "workday",
+  "jobgether",
+  "themuse",
+  "jobright",
+  "remotive",
+  "jobicy",
+  "remoteok",
+  "wwr",
+  "workingnomads",
+  "jobspresso",
+  "skipthedrive",
+  "arc",
+  "arbeitnow",
+  "usajobs",
+  "adzuna",
+  "googlejobs",
+  "ziprecruiter",
+  "monster",
+  "indeed",
+  "careerbuilder",
+];
+
 export const CSV_HEADERS = [
+  "seq",
   "id",
   "title",
   "organization",

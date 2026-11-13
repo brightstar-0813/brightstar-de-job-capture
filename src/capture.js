@@ -1,8 +1,10 @@
 /**
  * Capture US-remote data engineering jobs — public APIs/feeds first
- * (Greenhouse, Lever, Ashby, Himalayas, Remotive, Remote OK, WWR),
- * plus Dice and Built In over HTTP/curl. JobRight uses Playwright
- * (Cloudflare clearance cookies). ZipRecruiter/Monster stay off by default.
+ * (Greenhouse, Lever, Ashby, Himalayas, Remotive, Jobicy, Remote OK, WWR,
+ * Working Nomads, Jobspresso, SkipTheDrive, Arc, Jobgether, Arbeitnow,
+ * The Muse, USAJOBS, Adzuna, Google Jobs), plus Dice / Built In over HTTP/curl,
+ * JobRight via Playwright (Cloudflare clearance, no account login),
+ * and Playwright ZipRecruiter / Monster. Indeed / CareerBuilder stay off by default.
  */
 
 import { chromium } from "playwright";
@@ -16,10 +18,23 @@ import { searchLeverJobs } from "./lever/search.js";
 import { searchAshbyJobs } from "./ashby/search.js";
 import { searchHimalayasJobs } from "./himalayas/search.js";
 import { searchRemotiveJobs } from "./remotive/search.js";
+import { searchJobicyJobs } from "./jobicy/search.js";
 import { searchRemoteokJobs } from "./remoteok/search.js";
 import { searchWwrJobs } from "./wwr/search.js";
+import { searchJobgetherJobs } from "./jobgether/search.js";
+import { searchArbeitnowJobs } from "./arbeitnow/search.js";
+import { searchThemuseJobs } from "./themuse/search.js";
+import { searchWorkingnomadsJobs } from "./workingnomads/search.js";
+import { searchJobspressoJobs } from "./jobspresso/search.js";
+import { searchSkipthedriveJobs } from "./skipthedrive/search.js";
+import { searchArcJobs } from "./arc/search.js";
+import { searchUsajobsJobs } from "./usajobs/search.js";
+import { searchAdzunaJobs } from "./adzuna/search.js";
+import { searchGoogleJobs } from "./googlejobs/search.js";
 import { searchZiprecruiterJobs } from "./ziprecruiter/search.js";
 import { searchMonsterJobs } from "./monster/search.js";
+import { searchIndeedJobs } from "./indeed/search.js";
+import { searchCareerbuilderJobs } from "./careerbuilder/search.js";
 import { captureRuleReason } from "./filter.js";
 import {
   beginRun,
@@ -66,10 +81,23 @@ function enabledSources() {
   if (config.captureLever) out.push("lever");
   if (config.captureAshby) out.push("ashby");
   if (config.captureRemotive) out.push("remotive");
+  if (config.captureJobicy) out.push("jobicy");
   if (config.captureRemoteok) out.push("remoteok");
   if (config.captureWwr) out.push("wwr");
+  if (config.captureJobgether) out.push("jobgether");
+  if (config.captureArbeitnow) out.push("arbeitnow");
+  if (config.captureThemuse) out.push("themuse");
+  if (config.captureWorkingnomads) out.push("workingnomads");
+  if (config.captureJobspresso) out.push("jobspresso");
+  if (config.captureSkipthedrive) out.push("skipthedrive");
+  if (config.captureArc) out.push("arc");
+  if (config.captureUsajobs) out.push("usajobs");
+  if (config.captureAdzuna) out.push("adzuna");
+  if (config.captureGooglejobs) out.push("googlejobs");
   if (config.captureZiprecruiter) out.push("ziprecruiter");
   if (config.captureMonster) out.push("monster");
+  if (config.captureIndeed) out.push("indeed");
+  if (config.captureCareerbuilder) out.push("careerbuilder");
   if (config.captureJobright) out.push("jobright");
   return out;
 }
@@ -103,7 +131,6 @@ async function runPool(runners, concurrency) {
 }
 
 async function collectFeedJobs() {
-  // Node-fetch ATS/feeds — fine in parallel.
   const fetchRunners = [];
   if (config.captureHimalayas) fetchRunners.push(["himalayas", searchHimalayasJobs]);
   if (config.captureGreenhouse) {
@@ -112,7 +139,26 @@ async function collectFeedJobs() {
   if (config.captureLever) fetchRunners.push(["lever", searchLeverJobs]);
   if (config.captureAshby) fetchRunners.push(["ashby", searchAshbyJobs]);
   if (config.captureRemotive) fetchRunners.push(["remotive", searchRemotiveJobs]);
+  if (config.captureJobicy) fetchRunners.push(["jobicy", searchJobicyJobs]);
   if (config.captureRemoteok) fetchRunners.push(["remoteok", searchRemoteokJobs]);
+  if (config.captureJobgether) fetchRunners.push(["jobgether", searchJobgetherJobs]);
+  if (config.captureArbeitnow) fetchRunners.push(["arbeitnow", searchArbeitnowJobs]);
+  if (config.captureThemuse) fetchRunners.push(["themuse", searchThemuseJobs]);
+  if (config.captureWorkingnomads) {
+    fetchRunners.push(["workingnomads", searchWorkingnomadsJobs]);
+  }
+  if (config.captureJobspresso) {
+    fetchRunners.push(["jobspresso", searchJobspressoJobs]);
+  }
+  if (config.captureSkipthedrive) {
+    fetchRunners.push(["skipthedrive", searchSkipthedriveJobs]);
+  }
+  if (config.captureArc) fetchRunners.push(["arc", searchArcJobs]);
+  if (config.captureUsajobs) fetchRunners.push(["usajobs", searchUsajobsJobs]);
+  if (config.captureAdzuna) fetchRunners.push(["adzuna", searchAdzunaJobs]);
+  if (config.captureGooglejobs) {
+    fetchRunners.push(["googlejobs", searchGoogleJobs]);
+  }
 
   // curl sources — limit concurrency; Cloudflare rate-limits burst traffic.
   const curlRunners = [];
@@ -126,11 +172,12 @@ async function collectFeedJobs() {
 }
 
 function needsBrowser() {
-  // JobRight needs Playwright for Cloudflare; ZR/Monster optional.
   return (
     config.captureJobright ||
     config.captureZiprecruiter ||
-    config.captureMonster
+    config.captureMonster ||
+    config.captureIndeed ||
+    config.captureCareerbuilder
   );
 }
 
@@ -163,7 +210,6 @@ export async function runCapture({ skipSlack = false } = {}) {
       console.log(`[capture] API/curl mode — no Playwright browser`);
     }
 
-    // Parallel public HTTP sources (Built In / Dice / ATS / feeds).
     const feedBatches = await collectFeedJobs();
     for (const batch of feedBatches) {
       if (!batch) continue;
@@ -172,6 +218,7 @@ export async function runCapture({ skipSlack = false } = {}) {
       }
     }
 
+    // JobRight: Playwright public search (no account login).
     if (browser && config.captureJobright) {
       await runNamedSource("jobright", async () => {
         const { jobs } = await searchJobrightJobs(browser);
@@ -180,7 +227,6 @@ export async function runCapture({ skipSlack = false } = {}) {
       });
     }
 
-    // Optional browser-only boards (off by default).
     if (browser && config.captureZiprecruiter) {
       await runNamedSource("ziprecruiter", async () => {
         const { jobs, blocked } = await searchZiprecruiterJobs(browser);
@@ -196,6 +242,26 @@ export async function runCapture({ skipSlack = false } = {}) {
         const { jobs, blocked } = await searchMonsterJobs(browser);
         console.log(
           `[capture] monster jobs: ${jobs.length}${blocked ? " (blocked)" : ""}`
+        );
+        ingestJobs(jobs, runId, counts, newJobs);
+      });
+    }
+
+    if (browser && config.captureIndeed) {
+      await runNamedSource("indeed", async () => {
+        const { jobs, blocked } = await searchIndeedJobs(browser);
+        console.log(
+          `[capture] indeed jobs: ${jobs.length}${blocked ? " (blocked)" : ""}`
+        );
+        ingestJobs(jobs, runId, counts, newJobs);
+      });
+    }
+
+    if (browser && config.captureCareerbuilder) {
+      await runNamedSource("careerbuilder", async () => {
+        const { jobs, blocked } = await searchCareerbuilderJobs(browser);
+        console.log(
+          `[capture] careerbuilder jobs: ${jobs.length}${blocked ? " (blocked)" : ""}`
         );
         ingestJobs(jobs, runId, counts, newJobs);
       });
@@ -218,9 +284,14 @@ export async function runCapture({ skipSlack = false } = {}) {
     console.log(
       `[capture] done — new=${counts.newCount} updated=${counts.updatedCount} skipped=${counts.skippedCount}`
     );
-    console.log(
-      `[capture] csv=${csvOut.csvPath} (rows=${csvOut.count})`
-    );
+    console.log(`[capture] csv=${csvOut.csvPath} (rows=${csvOut.count})`);
+    const parts = Object.entries(csvOut.bySource || {})
+      .filter(([, v]) => v.count > 0)
+      .map(([src, v]) => `${src}=${v.count}`)
+      .join(", ");
+    if (parts) {
+      console.log(`[capture] per-source csv: ${parts}`);
+    }
 
     if (!skipSlack) {
       try {
@@ -245,6 +316,7 @@ export async function runCapture({ skipSlack = false } = {}) {
       csvPath: csvOut.csvPath,
       latestPath: csvOut.latestPath,
       csvCount: csvOut.count,
+      bySource: csvOut.bySource,
       lastCsv: getMeta("last_csv_path"),
     };
   } catch (err) {

@@ -1,5 +1,5 @@
 /**
- * JobRight Playwright client — public search via browser.
+ * JobRight Playwright client -- public search via browser.
  * Cloudflare Turnstile blocks curl; we reuse saved storageState and, when
  * challenged, open a headed window once to clear it and persist cookies.
  * No JobRight account login is required.
@@ -134,7 +134,7 @@ export async function persistStorageState(context) {
   const authPath = config.jobrightAuthPath;
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   await context.storageState({ path: authPath });
-  console.log(`[jobright] saved clearance cookies → ${authPath}`);
+  console.log(`[jobright] saved clearance cookies -> ${authPath}`);
 }
 
 /**
@@ -163,7 +163,7 @@ export async function waitOutChallenge(page, timeoutMs = CHALLENGE_WAIT_MS) {
  */
 export async function refreshClearanceHeaded(seedQuery = "Data Engineer") {
   console.warn(
-    `[jobright] Cloudflare challenge — opening headed browser (solve if needed, up to ${Math.round(CHALLENGE_WAIT_MS / 1000)}s)`
+    `[jobright] Cloudflare challenge -- opening headed browser (solve if needed, up to ${Math.round(CHALLENGE_WAIT_MS / 1000)}s)`
   );
   const browser = await chromium.launch(browserLaunchOptions(false));
   let context;
@@ -174,7 +174,7 @@ export async function refreshClearanceHeaded(seedQuery = "Data Engineer") {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
     const cleared = await waitOutChallenge(page);
     if (!cleared) {
-      console.warn(`[jobright] challenge wait timed out — JobRight may stay empty`);
+      console.warn(`[jobright] challenge wait timed out -- JobRight may stay empty`);
       return false;
     }
     await persistStorageState(context);

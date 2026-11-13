@@ -5,8 +5,9 @@
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$taskName = "AIJobCapture_5am5pm"
+$taskName = "DEJobCapture_5am5pm"
 $legacyTaskNames = @(
+  "AIJobCapture_5am5pm",
   "AIJobCapture_Every8Hours",
   "AIJobCapture_Every12Hours",
   "DiceJobCapture_5am5pm",

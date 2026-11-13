@@ -1,7 +1,7 @@
 /**
- * JobRight.ai data-engineering search — remote US roles via Playwright.
+ * JobRight.ai data-engineering search -- remote US roles via Playwright.
  * Uses saved Cloudflare clearance cookies; opens a headed window once when
- * challenged. Does not filter by already-applied — CSV is shared across people.
+ * challenged. No JobRight account login. CSV is shared (no already-applied filter).
  */
 
 import { config } from "../config.js";
@@ -134,11 +134,11 @@ export async function searchJobrightJobs(browser) {
 
       if (api.challenged && !refreshed) {
         refreshed = true;
-        console.warn(`[jobright] blocked on query="${query}" — refreshing clearance`);
+        console.warn(`[jobright] blocked on query="${query}" ? refreshing clearance`);
         await context.close().catch(() => {});
         const ok = await refreshClearanceHeaded(query);
         if (!ok) {
-          console.warn(`[jobright] could not clear challenge — skipping remaining seeds`);
+          console.warn(`[jobright] could not clear challenge ? skipping remaining seeds`);
           break;
         }
         context = await openJobrightContext(browser);
@@ -154,13 +154,13 @@ export async function searchJobrightJobs(browser) {
         }
         if (api.challenged) {
           console.warn(
-            `[jobright] still challenged after headed refresh — skipping JobRight`
+            `[jobright] still challenged after headed refresh ? skipping JobRight`
           );
           break;
         }
       } else if (api.challenged && refreshed) {
         console.warn(
-          `[jobright] challenged again after refresh — stopping JobRight early`
+          `[jobright] challenged again after refresh ? stopping JobRight early`
         );
         break;
       }
